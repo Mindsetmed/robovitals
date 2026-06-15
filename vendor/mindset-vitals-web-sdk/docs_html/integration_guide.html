@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Integration Guide - Vitals Web SDK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  
+    <nav class="nav">
+      <div class="nav-content">
+        <h1>Vitals Web SDK <span class="version">v2.6.0</span></h1>
+        <div class="nav-links">
+          <a href="index.html" >Overview</a>
+          <a href="integration_guide.html" class="active">Integration Guide</a>
+          <a href="mindset_rest_apis.html" >REST APIs</a>
+          <a href="architecture.html" >Architecture</a>
+          <a href="examples_vanilla-js.html" >Example</a>
+        </div>
+      </div>
+    </nav>
+  
+  <main class="content">
+    <h1>@mindset-vitals/web-sdk Integration Guide</h1>
+<p>The Vitals Web SDK is made up of two major components - the worker file that runs in a Web Worker, and the Vital Client library that is used by your app to initialize the worker, and send commands and receive messages from the worker.</p>
+<h2>Overview</h2>
+<p>The integration requires both frontend (client library) and backend (server) components:</p>
+<p><strong>Client Library (Browser):</strong></p>
+<ul>
+<li>Displays video feed and guides user</li>
+<li>Captures vitals using WASM algorithm</li>
+<li>Sends vitals to your backend</li>
+</ul>
+<p><strong>Server (Your Backend):</strong></p>
+<ul>
+<li>Creates patients via Mindset REST API</li>
+<li>Authorizes WASM and creates notifications</li>
+<li>Submits vitals to Mindset REST API using clinic API key</li>
+</ul>
+<p><strong>Security:</strong> All sensitive operations happen server-side. Client library never sees API keys, auth tokens, notification IDs, or PRO submission IDs.</p>
+<p>The <code>examples/vanilla-js</code> app is the reference implementation for this flow. The docs use its backend endpoint names:</p>
+<pre><code>SDK client -&gt; your backend endpoint -&gt; Mindset REST API
+
+/patient/create  -&gt; POST /users/shadow
+/auth            -&gt; POST /users/{patientId}/notifications
+/patient/vitals  -&gt; PUT /users/{patientId}/pro_submissions/{proSubmissionId}
+</code></pre>
+<p>When your backend calls <code>POST /users/{patientId}/notifications</code>, Mindset returns both a notification <code>id</code> and <code>meta.pro_submission_id</code>. Store <code>meta.pro_submission_id</code> server-side and use that numeric value for the later <code>/pro_submissions/{proSubmissionId}</code> request. The notification <code>id</code> is not the PRO submission ID.</p>
+<h2>Steps to integrate and use SDK</h2>
+<p>The worker file and its dependencies need to be moved to a directory that will be available to your web application.</p>
+<p>If you are integrating the SDK through a zip file distribution and using the SDK&#39;s ES module, copy dist/index.js into your source code. This is where <code>createVitalClient</code> will be imported from. If you are integrating with the zip file distribution and using the UMD module, copy dist/index.umd.js into your public folder, and use the file&#39;s URL as the value for a script tag&#39;s src attribute. Copy the worker file and its dependencies into your public folder (these are all the files in the dist folder other than index.js, index.js.map, index.umd.js, and index.umd.js.map).</p>
+<p>If you are integrating the SDK through an NPM module, follow these steps to move the necessary files to a public directory available to your web application:</p>
+<ul>
+<li>Run the command <code>npx mindset-vitals-web-sdk-copy-worker-files &lt;public-directory&gt;</code> to move the worker files to <code>&lt;public-directory&gt;</code>. If <code>&lt;public-directory&gt;</code> is not given, a folder named “public” in the root directory of the project will be used, and if the “public” folder does not exist, it will be created.</li>
+<li>If using a UMD module, the <code>npx mindset-vitals-web-sdk-copy-vital-client-umd &lt;public-directory&gt;</code> command will move the UMD bundle to <code>&lt;public-directory&gt;</code>. If <code>&lt;public-directory&gt;</code> is not given, a folder named “public” in the root directory the project will be used, and if the “public” folder does not exist, it will be created.</li>
+</ul>
+<p>Import SDK into project:</p>
+<p><strong>ES Module (recommended):</strong></p>
+<pre><code class="language-javascript">import { createVitalClient } from &#39;@mindset-vitals/web-sdk&#39;;
+</code></pre>
+<p><strong>Script tag:</strong></p>
+<pre><code class="language-html">&lt;script src=&quot;./dist/index.umd.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+  const { createVitalClient } = window.VitalSDK;
+&lt;/script&gt;
+</code></pre>
+<p>Start using the SDK:</p>
+<ul>
+<li>Calling <code>createVitalClient(config)</code> returns a <code>vitalClient</code> object. The <code>config</code> object requires:<ul>
+<li><code>workerDirectory</code> - path to worker files (typically <code>/dist</code>)</li>
+<li><code>authenticator</code> - callback function that receives a <code>runToken</code> and returns WASM authorization</li>
+</ul>
+</li>
+</ul>
+<p><strong>Example authenticator (calls your backend):</strong></p>
+<pre><code class="language-javascript">async function authenticator(runToken) {
+  // Call YOUR backend - it handles Mindset REST API communication
+  const response = await fetch(&#39;/auth&#39;, {
+    method: &#39;POST&#39;,
+    headers: { &#39;Content-Type&#39;: &#39;application/json&#39; },
+    body: JSON.stringify({
+      patientId: currentPatientId,
+      runToken
+    })
+  });
+  const data = await response.json();
+  return data.vitalCoreAuth;
+}
+</code></pre>
+<p><strong>Your backend creates an authorization:</strong></p>
+<p>For complete REST API documentation, see <strong><a href="mindset_rest_apis.html">Mindset REST APIs</a></strong>.</p>
+<pre><code class="language-javascript">// Server-side code (Node.js/Express example)
+app.post(&#39;/auth&#39;, async (req, res) =&gt; {
+  const { patientId, runToken } = req.body;
+
+  // Create notification with runToken
+  const response = await fetch(`${MINDSET_API_URL}/users/${patientId}/notifications`, {
+    method: &#39;POST&#39;,
+    headers: {
+      &#39;Content-Type&#39;: &#39;application/json&#39;,
+      &#39;Authorization&#39;: `Bearer ${MINDSET_API_KEY}`
+    },
+    body: JSON.stringify({
+      clinic_id: CLINIC_ID,
+      notification_type: &#39;VITAL-TRAC&#39;,
+      trigger_text: false,
+      pre_auth: true,
+      vitals_run_token: runToken
+    })
+  });
+
+  const data = await response.json();
+
+  // Store PRO submission ID for later vitals submission.
+  // Use meta.pro_submission_id, not the notification id.
+  proSubmissionStore.set(patientId, data.meta.pro_submission_id);
+
+  // Return WASM auth to client
+  res.json({
+    success: true,
+    vitalCoreAuth: data.vitals_auth
+  });
+});
+</code></pre>
+<p>See <code>examples/vanilla-js</code> for complete end-to-end example including vitals submission.</p>
+<ul>
+<li>Add event listeners to <code>vitalClient</code> by calling <code>vitalClient.on()</code> with the first argument being the event type as a string, and the second argument a callback that is invoked when the event occurs. Depending on the event, the callback will receive an argument that contains data related to the event.<ul>
+<li><code>ready</code> event lets the app know that the worker has been initialized, and a measurement session or preview mode can be started</li>
+<li><code>timeLeft</code> event fires during a measurement session every second with progress data (object containing timeLeft, maxTime, percentComplete, percentRemaining)</li>
+<li><code>stop</code> event fires when a measurement session ends. The event listener callback is passed the final results for the measurement session</li>
+</ul>
+</li>
+<li>Call <code>vitalClient.init()</code> to initialize the SDK (no parameters required - face guide coordinates are automatically calculated from the video element)</li>
+</ul>
+<p>When the worker is ready and the <code>ready</code> event has been emitted, a measurement session or preview mode can be started:</p>
+<ul>
+<li>To start preview mode, call <code>vitalClient.startPreviewMode(videoEl)</code> with a reference to the video element as an argument</li>
+<li>To start a measurement session, call <code>vitalClient.start(vitalsToMeasure, videoEl)</code> with the first argument being an array of strings specifying which vitals are to be measured, and the second argument being a reference to the video element. If the worker is currently operating in preview mode, preview mode will automatically be stopped before starting the measurement session.<ul>
+<li>The array of strings specifying which vitals are to be measued can contain the following values: <code>PR_MD</code>, <code>PR_GW</code>, <code>RR_MD</code>, <code>RR_GW</code>, <code>SPO2_MD</code>, <code>SPO2_GW</code>, <code>BP_MD</code>, <code>BP_GW</code>, <code>HRV_MD</code>, <code>HRV_GW</code>. Only vitals that are authorized to be measured will be measured.</li>
+</ul>
+</li>
+<li>When a measurement session is finished, the <code>stop</code> event fires with results:</li>
+</ul>
+<pre><code class="language-javascript">vitalClient.on(&#39;stop&#39;, async (result) =&gt; {
+  // SDK returns complete VITAL-TRAC structure - ready to submit!
+  const { finalVitalsMeasurementValues, signsMsgs, timestamp } = result;
+
+  // Heart rate
+  const hr = finalVitalsMeasurementValues.PR_MD?.hr || finalVitalsMeasurementValues.PR_GW?.hr;
+
+  // Respiratory rate
+  const rr = finalVitalsMeasurementValues.RR_MD?.rr || finalVitalsMeasurementValues.RR_GW?.rr;
+
+  // Blood oxygen saturation
+  const spO2 = finalVitalsMeasurementValues.SPO2_GW?.spO2;
+
+  // Blood pressure
+  const bp = finalVitalsMeasurementValues.BP_GW;
+  if (bp) {
+    console.log(`BP: ${bp.BP_SYS}/${bp.BP_DIA}`);
+  }
+
+  // Submit to your backend (send entire result - SDK provides everything!)
+  await fetch(&#39;/patient/vitals&#39;, {
+    method: &#39;POST&#39;,
+    headers: { &#39;Content-Type&#39;: &#39;application/json&#39; },
+    body: JSON.stringify({
+      patientId: currentPatientId,
+      vitals: result  // SDK provides complete VITAL-TRAC structure
+    })
+  });
+
+  // All vitals follow pattern: finalVitalsMeasurementValues.{TAG}.{property}
+  // Tags: PR_MD, PR_GW, RR_MD, RR_GW, SPO2_MD, SPO2_GW, BP_MD, BP_GW, HRV_MD, HRV_GW
+});
+</code></pre>
+<p><strong>Your backend submits to Mindset REST API:</strong></p>
+<p>For complete REST API documentation including patient management, see <strong><a href="mindset_rest_apis.html">Mindset REST APIs</a></strong>.</p>
+<pre><code class="language-javascript">// Server-side code - submit vitals using clinic API key
+app.post(&#39;/patient/vitals&#39;, async (req, res) =&gt; {
+  const { patientId, vitals } = req.body;
+
+  // Lookup PRO submission ID stored during authorization
+  const proSubmissionId = proSubmissionStore.get(patientId);
+
+  // SDK provides complete VITAL-TRAC structure - just pass it through!
+  const response = await fetch(
+    `${MINDSET_API_URL}/users/${patientId}/pro_submissions/${proSubmissionId}`,
+    {
+      method: &#39;PUT&#39;,
+      headers: {
+        &#39;Content-Type&#39;: &#39;application/json&#39;,
+        &#39;Authorization&#39;: `Bearer ${MINDSET_API_KEY}` // Use clinic API key
+      },
+      body: JSON.stringify({
+        pro_type: &#39;VITAL-TRAC&#39;,
+        pro_data: {
+          data: vitals, // SDK provides everything ready for submission
+          recorded_at: new Date().toISOString()
+        }
+      })
+    }
+  );
+
+  const data = await response.json();
+  res.json({ success: true, data });
+});
+</code></pre>
+<p><strong>Note:</strong> The clinic API key must have <code>PROVIDER_SERVICE</code> scope to submit PRO data on behalf of patients.</p>
+<h2>Key Methods</h2>
+<p><strong>Core lifecycle:</strong></p>
+<ul>
+<li><code>init()</code> - Initialize SDK</li>
+<li><code>authorize()</code> - Authorize WASM (calls your authenticator callback)</li>
+<li><code>start(selectedVitals, videoEl)</code> - Start measurement</li>
+<li><code>stop()</code> - Stop measurement</li>
+<li><code>destroy()</code> - Cleanup</li>
+</ul>
+<p><strong>Preview mode:</strong></p>
+<ul>
+<li><code>startPreviewMode(videoEl)</code> - Show camera without measuring</li>
+<li><code>stopPreviewMode()</code> - Stop preview</li>
+</ul>
+<p><strong>Utilities:</strong></p>
+<ul>
+<li><code>getVersion()</code> - Get SDK version</li>
+<li><code>setExtendedLogs(enabled)</code> - Enable debug logging</li>
+</ul>
+<p>For complete client library documentation, see <a href="index.html">README.md</a>.</p>
+<h2>Key Events</h2>
+<p><strong>Lifecycle:</strong></p>
+<ul>
+<li><code>ready</code> - SDK initialized</li>
+<li><code>authorizedVitals</code> - List of authorized vitals after authorization</li>
+<li><code>maxSessionTime</code> - Max duration for session</li>
+<li><code>start</code> - Measurement started</li>
+<li><code>stop</code> - Measurement complete (includes results)</li>
+</ul>
+<p><strong>Progress:</strong></p>
+<ul>
+<li><code>timeLeft</code> - Progress updates every second</li>
+</ul>
+<p><strong>Quality feedback:</strong></p>
+<ul>
+<li><code>signsMessage</code> - Real-time guidance (face position, lighting, movement)</li>
+</ul>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>error</code> - SDK errors</li>
+</ul>
+<p>For complete event documentation, see <a href="index.html">README.md</a>.</p>
+<h2>Script commands to move worker, worker dependencies, and UMD module to a public directory</h2>
+<ul>
+<li><code>npx mindset-vitals-web-sdk-copy-worker-files &lt;public-directory&gt;</code><ul>
+<li>Moves the worker and worker dependency files to <code>&lt;public-directory&gt;</code>. If <code>&lt;public-directory&gt;</code> is not given, a folder named “public” in the root directory of the project will be used, and if the “public” folder does not exist, it will be created.</li>
+</ul>
+</li>
+<li><code>npx mindset-vitals-web-sdk-copy-vital-client-umd &lt;public-directory&gt;</code><ul>
+<li>Moves the UMD module to <code>&lt;public-directory&gt;</code>. If <code>&lt;public-directory&gt;</code> is not given, a folder named “public” in the root directory the project will be used, and if the “public” folder does not exist, it will be created</li>
+</ul>
+</li>
+</ul>
+
+  </main>
+</body>
+</html>

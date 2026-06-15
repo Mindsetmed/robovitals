@@ -1,0 +1,90 @@
+<div class="hg-landing">
+  <div class="hg-landing-inner">
+    @if (alertMessage) {
+    <div class="hg-alert hg-alert-{{ alertType }}" role="alert">{{ alertMessage }}</div>
+    }
+
+    @if (!isCrossOriginIsolated) {
+    <div class="hg-alert hg-alert-danger" role="alert">{{ isolationRequiredMessage }}</div>
+    }
+
+    @if (isCrossOriginIsolated && showWarmupProgress && sdkWarmupLoading && !sdkWarmupReady) {
+    <div class="hg-preload-status" role="status">
+      <span class="hg-preload-label">Initializing AI-Powered Vital Monitoring... {{ preloadPercent }}%</span>
+      <span class="hg-preload-track" aria-hidden="true">
+        <span class="hg-preload-fill" [style.width.%]="preloadPercent"></span>
+      </span>
+    </div>
+    }
+
+    <section class="hg-patient-card">
+      <div class="hg-patient-card-header">
+        <h1 class="hg-patient-card-title">Patient Identification</h1>
+        <p class="hg-patient-card-subtitle">
+          Search for an existing patient or enter a patient ID to accurately link captured vital signs to the
+          patient's medical record.
+        </p>
+      </div>
+
+      <form [formGroup]="form" novalidate class="hg-patient-form">
+        <div class="hg-patient-id-row">
+          <div class="hg-patient-id-field">
+            <label class="hg-field-label" for="patientId">Patient ID <span class="hg-field-required">*</span></label>
+            <input id="patientId" type="text" class="hg-field-input" formControlName="patientId" autocomplete="off"
+              placeholder="Enter Patient ID or generate a new one" />
+          </div>
+
+          <div class="hg-form-actions">
+            <button type="button" class="hg-btn hg-btn-secondary" [disabled]="isProcessing" (click)="onGenerateId()">
+              Generate ID
+            </button>
+            <button type="button" class="hg-btn hg-btn-primary" [disabled]="captureDisabled" (click)="onCaptureClick()">
+              Capture Vitals
+            </button>
+          </div>
+        </div>
+
+        @if (showRegistrationFields) {
+        <div class="hg-registration-fields">
+          <div class="hg-field-block hg-field-block-full">
+            <label class="hg-field-label" for="email">Email <span class="hg-field-required">*</span></label>
+            <input id="email" type="email" class="hg-field-input" formControlName="email" />
+          </div>
+
+          <div class="hg-field-block">
+            <label class="hg-field-label" for="firstName">First Name <span class="hg-field-required">*</span></label>
+            <input id="firstName" type="text" class="hg-field-input" formControlName="firstName" />
+          </div>
+
+          <div class="hg-field-block">
+            <label class="hg-field-label" for="lastName">Last Name <span class="hg-field-required">*</span></label>
+            <input id="lastName" type="text" class="hg-field-input" formControlName="lastName" />
+          </div>
+
+          <div class="hg-field-block">
+            <label class="hg-field-label" for="birthDate">Date of birth <span class="hg-field-required">*</span></label>
+            <input id="birthDate" type="date" class="hg-field-input" formControlName="birthDate" />
+          </div>
+
+          <div class="hg-field-block">
+            <label class="hg-field-label" for="heightCm">Height (cm) <span class="hg-field-required">*</span></label>
+            <input id="heightCm" type="number" class="hg-field-input" formControlName="heightCm" min="1" max="300" />
+          </div>
+
+          <div class="hg-field-block">
+            <label class="hg-field-label" for="weightKg">Weight (kg) <span class="hg-field-required">*</span></label>
+            <input id="weightKg" type="number" class="hg-field-input" formControlName="weightKg" min="1" max="500" />
+          </div>
+
+          <div class="hg-field-block hg-field-block-full">
+            <label class="hg-field-label" for="temperature">Temperature (°F) <span
+                class="hg-field-required">*</span></label>
+            <input id="temperature" type="number" class="hg-field-input" formControlName="temperature" min="90"
+              max="110" step="0.1" />
+          </div>
+        </div>
+        }
+      </form>
+    </section>
+  </div>
+</div>

@@ -1,0 +1,23 @@
+{
+  "name": "vitals-web-sdk-vanilla-example",
+  "version": "1.0.0",
+  "description": "Vanilla JavaScript example for Vitals Web SDK",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "vitals",
+    "sdk",
+    "example"
+  ],
+  "author": "Mindset Vitals",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2"
+  }
+}

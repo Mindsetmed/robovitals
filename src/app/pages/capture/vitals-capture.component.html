@@ -1,0 +1,301 @@
+<div class="hg-vitals-page">
+    <header class="hg-vitals-page-header">
+        <button type="button" class="hg-vitals-btn-back" [disabled]="isSubmitting" (click)="onBackClick()">Back</button>
+        <h1 class="hg-vitals-page-title">Health Insights</h1>
+        <button type="button" class="hg-vitals-btn-done" *ngIf="scanState === 'scan_completed'"
+            [disabled]="isSubmitting" (click)="onDoneClick()">Done</button>
+        <span *ngIf="scanState !== 'scan_completed'"></span>
+    </header>
+
+    <div class="hg-vitals-body" [class.hg-vitals-body-results]="isResultsView">
+        <section class="hg-vitals-results" *ngIf="isResultsView; else scanView">
+            <ng-container *ngIf="resultRows.length; else resultsErrorOnly">
+                <div class="alert alert-info hg-vitals-submit-alert" role="status" *ngIf="isSubmitting">
+                    <div class="hg-vitals-submit-alert-inner">
+                        <span class="hg-vitals-submit-alert-spinner" aria-hidden="true"></span>
+                        <div class="hg-vitals-submit-alert-copy">
+                            <strong class="hg-vitals-submit-alert-title">Submitting vitals</strong>
+                            <span class="hg-vitals-submit-alert-text">Please wait while we save your results.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hg-vitals-results-banner hg-vitals-results-banner-success" *ngIf="showResultsSuccessBanner">
+                    <p>Your vitals were captured successfully.</p>
+                </div>
+
+                <div class="hg-vitals-results-grid" role="list">
+                    <article class="hg-vitals-metric" role="listitem" *ngFor="let row of resultRows">
+                        <div class="hg-vitals-metric-head">
+                            <span class="hg-vitals-metric-icon" aria-hidden="true">{{ vitalEmoji(row.id) }}</span>
+                            <h2 class="hg-vitals-metric-title">{{ row.title }}</h2>
+                            <span class="hg-vitals-rx-badge" *ngIf="showVitalMarkBadge(row)"
+                                title="Prescription use only" aria-hidden="true">
+                                <svg class="hg-vitals-vital-mark-badge-svg" viewBox="0 0 23 19" fill="none"
+                                    xmlns="http://www.w3.org/2000/svg">
+                                    <path
+                                        d="M7.31129 8.69141C8.65695 9.5 9.82292 10.5703 10.7373 11.8359C11.0168 12.2227 11.2724 12.6289 11.5 13.0469C11.7276 12.625 11.9832 12.2227 12.2627 11.8359C13.1771 10.5703 14.3431 9.5 15.6887 8.69141C17.4736 7.61719 19.57 7 21.8021 7H22.1974C22.6406 7 23 7.35156 23 7.78516C23 13.5664 18.2123 18.25 12.3026 18.25H11.5H10.6974C4.78767 18.25 0 13.5664 0 7.78516C0 7.35156 0.359375 7 0.802604 7H1.19792C3.43003 7 5.52639 7.61719 7.31129 8.69141ZM12.0391 0.96875C12.666 1.62891 14.4788 3.77344 15.4092 7.39844C13.8918 8.24219 12.5582 9.38281 11.5 10.7422C10.4418 9.38281 9.10816 8.24609 7.5908 7.39844C8.51719 3.77344 10.33 1.62891 10.9609 0.96875C11.1007 0.824219 11.2964 0.75 11.5 0.75C11.7036 0.75 11.8993 0.824219 12.0391 0.96875Z"
+                                        fill="#FFF"></path>
+                                </svg>
+                            </span>
+                            <span class="hg-vitals-rx-badge" *ngIf="!showVitalMarkBadge(row)"
+                                title="Prescription use only" aria-hidden="true">
+                                <svg class="hg-vitals-rx-badge-svg" viewBox="0 0 35 21" fill="none"
+                                    xmlns="http://www.w3.org/2000/svg">
+                                    <g clip-path="url(#clip0_hg_vitals_rx)">
+                                        <path
+                                            d="M19.8803 13.6133C20.7062 13.6133 21.3758 12.9452 21.3758 12.1211C21.3758 11.297 20.7062 10.6289 19.8803 10.6289C19.0543 10.6289 18.3848 11.297 18.3848 12.1211C18.3848 12.9452 19.0543 13.6133 19.8803 13.6133Z"
+                                            fill="#D8D8D8"></path>
+                                        <path d="M30.0005 0.5V5.5H35.0117L30.0005 0.5Z" fill="#D8D8D8"></path>
+                                        <path
+                                            d="M8.11179 6.20313H5.38696V8.29297H8.11179C8.6873 8.29297 9.16101 7.82422 9.16101 7.24609C9.16101 6.66797 8.69121 6.19922 8.11179 6.19922V6.20313Z"
+                                            fill="#D8D8D8"></path>
+                                        <path
+                                            d="M28.7478 5.5V0.5H2.50559C1.1236 0.5 0 1.62109 0 3V18C0 19.3789 1.1236 20.5 2.50559 20.5H32.5062C33.8881 20.5 35.0117 19.3789 35.0117 18V6.75H30.0006C29.3076 6.75 28.7478 6.19141 28.7478 5.5ZM14.7008 15.2734C15.1236 15.6719 15.1471 16.3281 14.7478 16.7539C14.3484 17.1758 13.6907 17.1992 13.264 16.8008L11.4866 15.1367L9.65828 16.8086C9.23546 17.1992 8.56991 17.168 8.1745 16.7461C7.77908 16.3242 7.81432 15.6602 8.23714 15.2656L9.94407 13.7031L6.54978 10.5234C6.5028 10.4805 6.46756 10.4336 6.42841 10.3867H5.37919V12.6875C5.37919 13.2617 4.9094 13.7344 4.32998 13.7344C3.75056 13.7344 3.28076 13.2656 3.28076 12.6875V5.16016C3.28076 4.58594 3.75056 4.11328 4.32998 4.11328H8.10794C9.84228 4.11328 11.2517 5.51953 11.2517 7.25C11.2517 8.98047 10.4178 9.71875 9.24329 10.1719L11.4983 12.2812L13.2679 10.6602C13.6907 10.2695 14.3563 10.3008 14.7517 10.7227C15.1471 11.1445 15.1119 11.8086 14.689 12.2031L13.033 13.7188L14.693 15.2734H14.7008ZM19.8803 14.2109C18.7254 14.2109 17.7897 13.2773 17.7897 12.125C17.7897 10.9727 18.7254 10.0391 19.8803 10.0391C21.0352 10.0391 21.9709 10.9727 21.9709 12.125C21.9709 13.2773 21.0352 14.2109 19.8803 14.2109ZM26.1286 13.9102C26.1286 14.0352 26.0503 14.1484 25.9329 14.1914C25.8154 14.2344 25.6823 14.1992 25.6001 14.1016L23.1415 11.1562V13.9102C23.1415 14.0742 23.0084 14.207 22.844 14.207C22.6795 14.207 22.5464 14.0742 22.5464 13.9102V10.332C22.5464 10.207 22.6247 10.0938 22.7422 10.0508C22.8596 10.0078 22.9927 10.043 23.0749 10.1406L25.5336 13.0859V10.332C25.5336 10.168 25.6667 10.0352 25.8311 10.0352C25.9955 10.0352 26.1286 10.168 26.1286 10.332V13.9102ZM29.2567 14.1992H27.1661C27.0017 14.1992 26.8686 14.0664 26.8686 13.9023V10.3242C26.8686 10.1602 27.0017 10.0273 27.1661 10.0273C27.3305 10.0273 27.4636 10.1602 27.4636 10.3242V13.6016H29.2567C29.4211 13.6016 29.5543 13.7344 29.5543 13.8984C29.5543 14.0625 29.4211 14.1953 29.2567 14.1953V14.1992ZM32.2713 10.1484C32.3652 10.0156 32.5531 9.98438 32.6862 10.0781C32.8194 10.1719 32.8507 10.3594 32.7567 10.4922L31.3199 12.5V13.8945C31.3199 14.0586 31.1868 14.1914 31.0224 14.1914C30.8579 14.1914 30.7248 14.0586 30.7248 13.8945V12.5L29.288 10.4922C29.1902 10.3594 29.2215 10.1719 29.3585 10.0781C29.4916 9.98047 29.6795 10.0117 29.7735 10.1484L31.0263 11.8945L32.2791 10.1484H32.2713Z"
+                                            fill="#D8D8D8"></path>
+                                    </g>
+                                    <defs>
+                                        <clipPath id="clip0_hg_vitals_rx">
+                                            <rect width="35" height="20" fill="white" transform="translate(0 0.5)">
+                                            </rect>
+                                        </clipPath>
+                                    </defs>
+                                </svg>
+                            </span>
+                        </div>
+
+                        <div class="hg-vitals-metric-value"
+                            [class.hg-vitals-metric-value-normal]="row.kind === 'measured'"
+                            [class.hg-vitals-metric-value-warn]="row.kind === 'out_of_range' || row.kind === 'unmeasurable'"
+                            [class.hg-vitals-metric-value-unmeasurable]="row.kind === 'unmeasurable'">
+                            <ng-container *ngIf="row.kind === 'unmeasurable'; else measuredValue">
+                                <span class="hg-vitals-value-primary">{{ row.displayText }}</span>
+                            </ng-container>
+                            <ng-template #measuredValue>
+                                <ng-container *ngIf="row.displayText; else numericValue">
+                                    <span class="hg-vitals-value-primary">{{ row.displayText }}</span>
+                                </ng-container>
+                                <ng-template #numericValue>
+                                    <span class="hg-vitals-value-prefix" *ngIf="row.valuePrefix">{{ row.valuePrefix }}
+                                    </span>
+                                    <span class="hg-vitals-value-primary">{{ row.valueNumber }}</span>
+                                    <span class="hg-vitals-value-unit" *ngIf="row.valueUnit">{{ row.valueUnit }}</span>
+                                </ng-template>
+                            </ng-template>
+                        </div>
+
+                        <p class="hg-vitals-metric-range">{{ row.normalRange }}</p>
+                        <ng-container *ngIf="row.bpDetail; else defaultMetricDesc">
+                            <p class="hg-vitals-metric-desc hg-vitals-metric-desc-full">
+                                {{ row.bpDetail.lifestyle }}
+                            </p>
+                            <ul class="hg-vitals-bp-stage-list">
+                                <li class="hg-vitals-bp-stage" *ngFor="let stage of row.bpDetail.stages">
+                                    <span class="hg-vitals-bp-stage-label">
+                                        <span class="hg-vitals-bp-stage-dot"
+                                            [class]="'hg-vitals-bp-stage-dot--' + stage.tone" aria-hidden="true"></span>
+                                        {{ stage.label }}
+                                    </span>
+                                    <span class="hg-vitals-bp-stage-range">{{ stage.range }}</span>
+                                </li>
+                            </ul>
+                        </ng-container>
+                        <ng-template #defaultMetricDesc>
+                            <p class="hg-vitals-metric-desc">{{ row.description }}</p>
+                        </ng-template>
+                    </article>
+                </div>
+
+                <aside class="hg-vitals-results-disclaimer" aria-label="Medical disclaimer">
+                    <span class="hg-vitals-results-disclaimer-icon" aria-hidden="true">
+                        <svg class="hg-vitals-vital-mark-badge-svg" viewBox="0 0 23 19" fill="none"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="M7.31129 8.69141C8.65695 9.5 9.82292 10.5703 10.7373 11.8359C11.0168 12.2227 11.2724 12.6289 11.5 13.0469C11.7276 12.625 11.9832 12.2227 12.2627 11.8359C13.1771 10.5703 14.3431 9.5 15.6887 8.69141C17.4736 7.61719 19.57 7 21.8021 7H22.1974C22.6406 7 23 7.35156 23 7.78516C23 13.5664 18.2123 18.25 12.3026 18.25H11.5H10.6974C4.78767 18.25 0 13.5664 0 7.78516C0 7.35156 0.359375 7 0.802604 7H1.19792C3.43003 7 5.52639 7.61719 7.31129 8.69141ZM12.0391 0.96875C12.666 1.62891 14.4788 3.77344 15.4092 7.39844C13.8918 8.24219 12.5582 9.38281 11.5 10.7422C10.4418 9.38281 9.10816 8.24609 7.5908 7.39844C8.51719 3.77344 10.33 1.62891 10.9609 0.96875C11.1007 0.824219 11.2964 0.75 11.5 0.75C11.7036 0.75 11.8993 0.824219 12.0391 0.96875Z"
+                                fill="#FFF"></path>
+                        </svg>
+                    </span>
+                    <div class="hg-vitals-results-disclaimer-copy">
+                        <p>{{ resultsDisclaimer }}</p>
+                        <p>{{ resultsBpNote }}</p>
+                    </div>
+                </aside>
+
+                <div class="hg-vitals-results-actions" *ngIf="showResultsIssueBanner || showResultsRetry">
+                    <div class="hg-vitals-results-banner hg-vitals-results-banner-error" *ngIf="showResultsIssueBanner">
+                        <p>{{ resultsBannerPrimary }}</p>
+                    </div>
+                    <footer class="hg-vitals-results-footer" *ngIf="showResultsRetry">
+                        <button type="button" class="hg-vitals-btn-retry" [disabled]="isSubmitting"
+                            (click)="onResultsRetry()">
+                            RETRY
+                        </button>
+                    </footer>
+                </div>
+            </ng-container>
+
+            <ng-template #resultsErrorOnly>
+                <aside class="hg-vitals-results-disclaimer" aria-label="Medical disclaimer">
+                    <span class="hg-vitals-results-disclaimer-icon" aria-hidden="true">
+                        <svg class="hg-vitals-vital-mark-badge-svg" viewBox="0 0 23 19" fill="none"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="M7.31129 8.69141C8.65695 9.5 9.82292 10.5703 10.7373 11.8359C11.0168 12.2227 11.2724 12.6289 11.5 13.0469C11.7276 12.625 11.9832 12.2227 12.2627 11.8359C13.1771 10.5703 14.3431 9.5 15.6887 8.69141C17.4736 7.61719 19.57 7 21.8021 7H22.1974C22.6406 7 23 7.35156 23 7.78516C23 13.5664 18.2123 18.25 12.3026 18.25H11.5H10.6974C4.78767 18.25 0 13.5664 0 7.78516C0 7.35156 0.359375 7 0.802604 7H1.19792C3.43003 7 5.52639 7.61719 7.31129 8.69141ZM12.0391 0.96875C12.666 1.62891 14.4788 3.77344 15.4092 7.39844C13.8918 8.24219 12.5582 9.38281 11.5 10.7422C10.4418 9.38281 9.10816 8.24609 7.5908 7.39844C8.51719 3.77344 10.33 1.62891 10.9609 0.96875C11.1007 0.824219 11.2964 0.75 11.5 0.75C11.7036 0.75 11.8993 0.824219 12.0391 0.96875Z"
+                                fill="#FFF"></path>
+                        </svg>
+                    </span>
+                    <div class="hg-vitals-results-disclaimer-copy">
+                        <p>{{ resultsDisclaimer }}</p>
+                        <p>{{ resultsBpNote }}</p>
+                    </div>
+                </aside>
+
+                <div class="hg-vitals-results-actions">
+                    <div class="hg-vitals-results-banner hg-vitals-results-banner-error">
+                        <p>{{ resultsBannerPrimary }}</p>
+                    </div>
+                    <footer class="hg-vitals-results-footer" *ngIf="showResultsRetry">
+                        <button type="button" class="hg-vitals-btn-retry" [disabled]="isSubmitting"
+                            (click)="onResultsRetry()">
+                            RETRY
+                        </button>
+                    </footer>
+                </div>
+            </ng-template>
+        </section>
+
+        <ng-template #scanView>
+            <div class="hg-vitals-scan">
+                <div class="hg-vitals-video-col">
+                    <div class="hg-vitals-video-stage">
+                        <video #videoEl class="hg-vitals-video" playsinline muted autoplay></video>
+                        <div class="hg-vitals-video-dim" *ngIf="isPreparingScan"></div>
+                        <svg *ngIf="showFaceFrame" class="hg-vitals-overlay-svg"
+                            [attr.viewBox]="'0 0 ' + scanOverlay.width + ' ' + scanOverlay.height"
+                            preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                            <defs>
+                                <mask [attr.id]="faceMaskId">
+                                    <rect [attr.width]="scanOverlay.width" [attr.height]="scanOverlay.height"
+                                        fill="white"></rect>
+                                    <rect [attr.x]="scanOverlay.face.x" [attr.y]="scanOverlay.face.y"
+                                        [attr.width]="scanOverlay.face.width" [attr.height]="scanOverlay.face.height"
+                                        [attr.rx]="scanOverlay.face.rx" [attr.ry]="scanOverlay.face.rx" fill="black">
+                                    </rect>
+                                </mask>
+                                <clipPath [attr.id]="scanClipId">
+                                    <rect width="336" height="432" fill="white"></rect>
+                                </clipPath>
+                                <clipPath [attr.id]="faceMaskId + '-line'">
+                                    <rect [attr.x]="scanOverlay.face.x" [attr.y]="scanOverlay.face.y"
+                                        [attr.width]="scanOverlay.face.width" [attr.height]="scanOverlay.face.height"
+                                        [attr.rx]="scanOverlay.face.rx" [attr.ry]="scanOverlay.face.rx"></rect>
+                                </clipPath>
+                                <linearGradient [attr.id]="'hgVitalsScanLineGrad-' + overlayInstanceId" x1="0" y1="0"
+                                    x2="1" y2="0">
+                                    <stop offset="0%" stop-color="transparent"></stop>
+                                    <stop offset="50%" stop-color="#3ebcf9"></stop>
+                                    <stop offset="100%" stop-color="transparent"></stop>
+                                </linearGradient>
+                            </defs>
+                            <rect [attr.width]="scanOverlay.width" [attr.height]="scanOverlay.height"
+                                fill="rgba(0,0,0,0.55)" [attr.mask]="'url(#' + faceMaskId + ')'"></rect>
+                            <rect [attr.x]="scanOverlay.face.x" [attr.y]="scanOverlay.face.y"
+                                [attr.width]="scanOverlay.face.width" [attr.height]="scanOverlay.face.height"
+                                [attr.rx]="scanOverlay.face.rx" [attr.ry]="scanOverlay.face.rx" fill="none"
+                                stroke="rgba(255,255,255,0.22)" stroke-width="1.5"></rect>
+                            <svg viewBox="0 0 336 432" fill="none" [attr.x]="scanOverlay.ring.x"
+                                [attr.y]="scanOverlay.ring.y" [attr.width]="scanOverlay.ring.width"
+                                [attr.height]="scanOverlay.ring.height">
+                                <g [attr.clip-path]="'url(#' + scanClipId + ')'">
+                                    <path *ngFor="let segment of scanProgressSegments; trackBy: trackScanSegment"
+                                        [attr.d]="segment.d" [attr.fill]="segment.fill"
+                                        [attr.fill-rule]="segment.evenodd ? 'evenodd' : null"
+                                        [attr.clip-rule]="segment.evenodd ? 'evenodd' : null"></path>
+                                </g>
+                            </svg>
+                            <g *ngIf="showScanLineAnimation" [attr.clip-path]="'url(#' + faceMaskId + '-line)'">
+                                <rect [attr.x]="scanOverlay.face.x" [attr.width]="scanOverlay.face.width" height="4"
+                                    [attr.fill]="'url(#hgVitalsScanLineGrad-' + overlayInstanceId + ')'">
+                                    <animate attributeName="y" [attr.values]="scanLineYValues" dur="2.2s"
+                                        repeatCount="indefinite"></animate>
+                                </rect>
+                            </g>
+                        </svg>
+                    </div>
+                </div>
+
+                <aside class="hg-vitals-side" [class.hg-vitals-side-warn]="showSideWarning">
+
+                    <div class="hg-vitals-side-alert" *ngIf="showSideWarning">
+                        <span class="hg-vitals-alert-icon" aria-hidden="true">!</span>
+                        <p class="hg-vitals-alert-text">{{ sideAlertMessage }}</p>
+                    </div>
+
+                    <div class="hg-vitals-side-loading" *ngIf="isPreparingScan">
+                        <div class="hg-vitals-spinner" aria-hidden="true"></div>
+                        <p class="hg-vitals-loading-title">Setting up your scan</p>
+                        <p class="hg-vitals-loading-sub">Setup may take a few minutes. Please stay on this screen.
+                        </p>
+                    </div>
+
+                    <ng-container *ngIf="!isPreparingScan">
+                        <ul class="hg-vitals-cards" *ngIf="showCaptureCards && captureCards.length">
+                            <li class="hg-vitals-card" *ngFor="let card of captureCards; trackBy: trackCaptureCard"
+                                [class.hg-vitals-card-active]="scanState === 'scanning_in_progress' && !showCardCompleteDots(card)"
+                                [class.hg-vitals-card-finalizing]="showCardCompleteDots(card)">
+                                <div class="hg-vitals-card-top">
+                                    <span class="hg-vitals-card-label">{{ card.shortLabel }}</span>
+                                    <div class="hg-vitals-card-loader" *ngIf="showCardLoader(card)">
+                                        <div class="hg-vitals-card-loader-track">
+                                            <div class="hg-vitals-card-loader-bar"></div>
+                                        </div>
+                                    </div>
+                                    <div class="hg-vitals-card-idle hg-vitals-card-idle-complete"
+                                        *ngIf="showCardCompleteDots(card)">
+                                        <span class="hg-vitals-card-idle-dot"></span>
+                                        <span class="hg-vitals-card-idle-dot"></span>
+                                        <span class="hg-vitals-card-idle-dot"></span>
+                                    </div>
+                                    <div class="hg-vitals-card-idle"
+                                        *ngIf="!showCardLoader(card) && !showCardCompleteDots(card)">
+                                        <span class="hg-vitals-card-idle-dot"></span>
+                                        <span class="hg-vitals-card-idle-dot"></span>
+                                        <span class="hg-vitals-card-idle-dot"></span>
+                                    </div>
+                                    <div class="hg-vitals-card-icon-wrap" aria-hidden="true">
+                                        <span class="hg-vitals-card-icon">{{ vitalEmoji(card.key) }}</span>
+                                    </div>
+                                </div>
+                            </li>
+                        </ul>
+
+                        <p class="hg-vitals-coaching-tip hg-vitals-coaching-tip-scan"
+                            [class.hg-vitals-coaching-tip-finalizing]="isScanFinalizing"
+                            *ngIf="scanState === 'scanning_in_progress' && showScanStatusMessage && !showSideWarning">
+                            {{ scanStatusMessage }}
+                        </p>
+
+                        <p class="hg-vitals-side-remaining"
+                            *ngIf="scanState === 'scanning_in_progress' && scanSecondsRemaining > 0">
+                            {{ scanSecondsRemaining }} seconds remaining
+                        </p>
+
+                        <div class="hg-vitals-side-ready" *ngIf="scanState === 'ready_to_scan'">
+                            <p class="hg-vitals-ready-title">Ready to scan</p>
+                            <p class="hg-vitals-ready-sub" *ngIf="!showCoachingTip">{{ readyScanSubtitle }}</p>
+                            <p class="hg-vitals-coaching-tip" *ngIf="showCoachingTip && !showSideWarning">{{ coachingTip
+                                }}</p>
+                        </div>
+                    </ng-container>
+
+                    <footer class="hg-vitals-side-footer" *ngIf="!isPreparingScan && showStartScanButton">
+                        <button type="button" class="hg-vitals-btn-start" [disabled]="startScanDisabled"
+                            (click)="onStartScanClick()">
+                            {{ startScanButtonText }}
+                        </button>
+                    </footer>
+                </aside>
+            </div>
+        </ng-template>
+    </div>
+</div>

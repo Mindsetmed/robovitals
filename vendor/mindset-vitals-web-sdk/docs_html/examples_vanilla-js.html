@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vanilla JS Example - Vitals Web SDK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  
+    <nav class="nav">
+      <div class="nav-content">
+        <h1>Vitals Web SDK <span class="version">v2.6.0</span></h1>
+        <div class="nav-links">
+          <a href="index.html" >Overview</a>
+          <a href="integration_guide.html" >Integration Guide</a>
+          <a href="mindset_rest_apis.html" >REST APIs</a>
+          <a href="architecture.html" >Architecture</a>
+          <a href="examples_vanilla-js.html" class="active">Example</a>
+        </div>
+      </div>
+    </nav>
+  
+  <main class="content">
+    <h1>Vitals Web SDK - Vanilla JavaScript Example</h1>
+<p>A complete working example demonstrating integration of the Vitals Web SDK with a Node.js/Express backend.</p>
+<h2>Quick Start</h2>
+<pre><code class="language-bash"># Install dependencies
+npm install
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your Mindset API credentials
+
+# Start server
+npm start
+</code></pre>
+<p>Then open <code>http://localhost:3015</code> in your browser.</p>
+<p><img src="examples/vanilla-js/demo_screenshot.png" alt="demo face placement">
+Depending on the device used, a user should be positioned approximately 12-18 inches from the camera in the area outlined in this screenshot.</p>
+<h2>Setup</h2>
+<h3>Prerequisites</h3>
+<ul>
+<li>Node.js 18+</li>
+<li>Modern browser with camera support (Chrome recommended)</li>
+<li>Mindset API credentials (API key and clinic ID)</li>
+</ul>
+<h3>Configuration</h3>
+<p>Create <code>.env</code> file in <code>examples/vanilla-js/</code>:</p>
+<pre><code class="language-bash">MINDSET_API_URL=https://api-develop.mindsetmedical.com
+MINDSET_API_KEY=your-api-key-here
+CLINIC_ID=your-clinic-id-here
+PORT=3015
+</code></pre>
+<h2>How It Works</h2>
+<p>This example is the reference implementation for a complete end-to-end flow:</p>
+<ol>
+<li><strong>Create Patient</strong> - Creates patient record via Mindset REST API</li>
+<li><strong>SDK Initializes</strong> - Camera starts, preview mode begins</li>
+<li><strong>Start Measurement</strong> - SDK calls authenticator → server creates notification → returns WASM auth</li>
+<li><strong>Measure Vitals</strong> - Follow guidance (face centered, well-lit, still)</li>
+<li><strong>Submit Results</strong> - SDK stops → client library sends vitals → server submits to Mindset REST API using clinic API key</li>
+</ol>
+<h3>Data Flow</h3>
+<pre><code>Client Library            Server                      Mindset REST API
+--------------            ------                      ----------------
+createPatient() ────────&gt; POST /patient/create ─────&gt; POST /users/shadow
+                                                      ← patient ID
+
+authorize() ───────────&gt; POST /auth ─────────────────&gt; POST /notifications
+(with runToken)                                       ← notification + vitals_auth
+                         (stores meta.pro_submission_id)
+
+stop() → vitals ───────&gt; POST /patient/vitals ──────&gt; PUT /pro_submissions/{proSubmissionId}
+                         (uses clinic API key)        (via PROVIDER_SERVICE scope)
+</code></pre>
+<p><strong>Security:</strong> Client library never sees auth tokens, notification IDs, PRO submission IDs, or the clinic API key. Server handles all authentication using the clinic API key.</p>
+<p><strong>For complete REST API documentation, see <a href="../../mindset_rest_apis.md">Mindset REST APIs</a>.</strong></p>
+<h2>Backend Endpoints</h2>
+<h3><code>POST /patient/create</code></h3>
+<p>Creates a new patient record.</p>
+<p><strong>Response:</strong></p>
+<pre><code class="language-json">{
+  &quot;success&quot;: true,
+  &quot;patientId&quot;: &quot;uuid&quot;
+}
+</code></pre>
+<h3><code>POST /auth</code></h3>
+<p>Authorizes WASM algorithm and creates notification.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;patientId&quot;: &quot;uuid&quot;,
+  &quot;runToken&quot;: { &quot;config&quot;: &quot;...&quot;, &quot;pubKey&quot;: &quot;...&quot; }
+}
+</code></pre>
+<p><strong>Response:</strong></p>
+<pre><code class="language-json">{
+  &quot;success&quot;: true,
+  &quot;vitalCoreAuth&quot;: { &quot;authToken&quot;: &quot;...&quot; }
+}
+</code></pre>
+<p><strong>Note:</strong> Server stores <code>meta.pro_submission_id</code> internally. Client library never sees it.</p>
+<h3><code>POST /patient/vitals</code></h3>
+<p>Submits vitals to Mindset REST API PRO system using clinic API key.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;patientId&quot;: &quot;uuid&quot;,
+  &quot;vitals&quot;: {
+    &quot;vitals&quot;: {
+      &quot;vitals&quot;: {
+        &quot;PR_GW&quot;: { &quot;hr&quot;: 72, &quot;hrConfidence&quot;: 95 },
+        &quot;RR_GW&quot;: { &quot;rr&quot;: 16, &quot;rrConfidence&quot;: 90 }
+      }
+    },
+    &quot;signsMsgs&quot;: { &quot;1234567890&quot;: { &quot;dataStatus&quot;: [&quot;S-HRT-061&quot;] } },
+    &quot;finalVitalsMeasurementValues&quot;: {
+      &quot;PR_GW&quot;: { &quot;hr&quot;: 72, &quot;hrConfidence&quot;: 95 },
+      &quot;RR_GW&quot;: { &quot;rr&quot;: 16, &quot;rrConfidence&quot;: 90 }
+    },
+    &quot;prevVitals&quot;: [],
+    &quot;prevSignsMsgs&quot;: [],
+    &quot;noValidMeasurements&quot;: false,
+    &quot;webAppVersion&quot;: &quot;1.0.0&quot;,
+    &quot;frameCollectionMethod&quot;: &quot;web-sdk&quot;,
+    &quot;timestamp&quot;: 1234567890
+  }
+}
+</code></pre>
+<p><strong>Response:</strong></p>
+<pre><code class="language-json">{
+  &quot;success&quot;: true,
+  &quot;data&quot;: { /* PRO submission record */ }
+}
+</code></pre>
+<p><strong>Note:</strong> SDK provides complete VITAL-TRAC structure ready for submission. Server uses <code>MINDSET_API_KEY</code> to submit via <code>PUT /users/{id}/pro_submissions/{proSubmissionId}</code> with <code>PROVIDER_SERVICE</code> scope, passing the vitals data directly: <code>{ pro_type: &#39;VITAL-TRAC&#39;, pro_data: { data: vitals, recorded_at: ... } }</code>. The <code>proSubmissionId</code> value is <code>meta.pro_submission_id</code> from the authorization response, not the notification <code>id</code>.</p>
+<h2>SDK Integration</h2>
+<h3>Basic Setup</h3>
+<pre><code class="language-javascript">import { createVitalClient } from &#39;/dist/index.js&#39;;
+
+// Authenticator callback
+async function authenticateVitalCore(runToken) {
+  const response = await fetch(&#39;/auth&#39;, {
+    method: &#39;POST&#39;,
+    headers: { &#39;Content-Type&#39;: &#39;application/json&#39; },
+    body: JSON.stringify({ patientId: currentPatientId, runToken })
+  });
+  const data = await response.json();
+  return data.vitalCoreAuth;
+}
+
+// Create client
+const vitalClient = createVitalClient({
+  workerDirectory: &#39;/dist&#39;,
+  authenticator: authenticateVitalCore
+});
+
+// Set up events
+vitalClient.on(&#39;ready&#39;, () =&gt; console.log(&#39;SDK ready&#39;));
+vitalClient.on(&#39;authorizedVitals&#39;, (vitals) =&gt; console.log(&#39;Authorized:&#39;, vitals));
+vitalClient.on(&#39;timeLeft&#39;, ({ timeLeft, percentComplete }) =&gt; {
+  updateProgress(percentComplete);
+});
+vitalClient.on(&#39;signsMessage&#39;, (msg) =&gt; handleWarnings(msg.dataStatus));
+vitalClient.on(&#39;stop&#39;, (result) =&gt; displayResults(result));
+
+// Initialize and start
+await vitalClient.init();
+await vitalClient.startPreviewMode(videoElement);
+await vitalClient.authorize();
+await vitalClient.start(selectedVitals, videoElement);
+</code></pre>
+<h3>Key Events</h3>
+<ul>
+<li><code>ready</code> - SDK initialized</li>
+<li><code>authorizedVitals</code> - List of authorized vitals</li>
+<li><code>timeLeft</code> - Progress updates (includes <code>percentComplete</code>)</li>
+<li><code>signsMessage</code> - Real-time quality feedback</li>
+<li><code>stop</code> - Measurement complete</li>
+</ul>
+<h3>Warning Codes</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>E-FDM-041</code></td>
+<td>Face not detected</td>
+</tr>
+<tr>
+<td><code>E-DQM-021</code></td>
+<td>Please stay still</td>
+</tr>
+<tr>
+<td><code>E-DQM-022</code></td>
+<td>Improve lighting</td>
+</tr>
+<tr>
+<td><code>W-RES-079</code></td>
+<td>Face too far</td>
+</tr>
+<tr>
+<td><code>W-RES-080</code></td>
+<td>Face too close</td>
+</tr>
+</tbody></table>
+<h2>Troubleshooting</h2>
+<p><strong>Patient creation fails:</strong></p>
+<ul>
+<li>Check <code>MINDSET_API_KEY</code> and <code>CLINIC_ID</code> in <code>.env</code></li>
+</ul>
+<p><strong>Camera not working:</strong></p>
+<ul>
+<li>Use HTTPS or localhost</li>
+<li>Allow camera permissions</li>
+</ul>
+<p><strong>Authorization fails:</strong></p>
+<ul>
+<li>Verify API credentials</li>
+<li>Check server console for errors</li>
+<li>Ensure clinic has vital core features enabled</li>
+</ul>
+<p><strong>Measurement issues:</strong></p>
+<ul>
+<li>Call <code>authorize()</code> before <code>start()</code></li>
+<li>Ensure face is visible and well-lit</li>
+<li>Check <code>authorizedVitals</code> event for available vitals</li>
+</ul>
+<h2>Development</h2>
+<pre><code class="language-bash"># Start server
+npm start
+
+# Changes to public/ files are served immediately
+# Refresh browser to see updates
+</code></pre>
+<h2>License</h2>
+<p>UNLICENSED - For demonstration purposes only</p>
+
+  </main>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vitals Web SDK - Example</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <main>
+      <!-- Status Section -->
+      <section class="status-section">
+        <div id="status" class="status">
+          <span class="status-indicator"></span>
+          <span class="status-text">Initializing...</span>
+        </div>
+        <div id="version" class="version"></div>
+      </section>
+
+      <!-- Patient Section -->
+      <section class="patient-section">
+        <div class="patient-controls">
+          <div class="input-group">
+            <label for="patient-id">Patient ID:</label>
+            <input
+              type="text"
+              id="patient-id"
+              readonly
+              placeholder="No patient selected"
+              class="patient-id-input"
+            />
+          </div>
+          <button id="create-patient" class="btn btn-primary">Create Patient</button>
+          <button id="clear-patient" class="btn btn-secondary" style="display: none;">Clear Patient</button>
+        </div>
+      </section>
+
+      <!-- Video Section -->
+      <section class="video-section">
+        <div class="video-container">
+          <video id="video" autoplay playsinline></video>
+        </div>
+        <div id="warnings-display"></div>
+      </section>
+
+      <!-- Measurement Section -->
+      <section class="measurement-section">
+        <h2>Measurement</h2>
+
+        <div id="measurement-controls" class="measurement-controls">
+          <button id="start-measurement" class="btn btn-success" disabled>Start Measurement</button>
+          <button id="stop-measurement" class="btn btn-danger" disabled>Stop Measurement</button>
+        </div>
+
+        <div id="no-patient-selected-warning">Select a patient before starting a measurement session</div>
+
+        <div id="progress-section" class="progress-section" style="display: none;">
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <div id="time-remaining" class="time-remaining">60s remaining</div>
+        </div>
+      </section>
+
+      <!-- Results Section -->
+      <section class="results-section">
+        <h2>Results</h2>
+        <div id="results" class="results">
+          <p class="empty-state">No measurements yet. Start a measurement to see results.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Vitals Web SDK Example - For demonstration purposes only -->
+  </div>
+
+  <!-- Import SDK and app -->
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>REST APIs - Vitals Web SDK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  
+    <nav class="nav">
+      <div class="nav-content">
+        <h1>Vitals Web SDK <span class="version">v2.6.0</span></h1>
+        <div class="nav-links">
+          <a href="index.html" >Overview</a>
+          <a href="integration_guide.html" >Integration Guide</a>
+          <a href="mindset_rest_apis.html" class="active">REST APIs</a>
+          <a href="architecture.html" >Architecture</a>
+          <a href="examples_vanilla-js.html" >Example</a>
+        </div>
+      </div>
+    </nav>
+  
+  <main class="content">
+    <h1>Mindset REST APIs for Vitals Web SDK Integration</h1>
+<p>This document describes the Mindset backend APIs required for integrating the Vitals Web SDK into your application.</p>
+<p><strong>Related Documentation:</strong></p>
+<ul>
+<li><a href="integration_guide.html">Integration Guide</a> - Step-by-step SDK integration</li>
+<li><a href="index.html">README</a> - SDK client library reference and features</li>
+<li><a href="architecture.html">Architecture</a> - Technical architecture and data flow</li>
+<li><a href="examples_vanilla-js.html">Vanilla JS Example</a> - Working example application</li>
+</ul>
+<p>Use the Vanilla JS example as the reference implementation. This document is the lower-level REST API reference for the Mindset calls made by the example backend.</p>
+<h2>Overview</h2>
+<p>The Vitals Web SDK integration requires <strong>three backend API calls</strong> to Mindset:</p>
+<ol>
+<li><strong>Create Patient</strong> - Register a patient in the Mindset system</li>
+<li><strong>Authorize Vitals</strong> - Authorize the vitals client sdk for a measurement session</li>
+<li><strong>Submit Results</strong> - Save vitals measurement results</li>
+</ol>
+<p><strong>Important:</strong> These are <strong>backend-only REST APIs</strong>. All API calls must be made from your server, never from the browser/client. Your frontend (Vitals Web SDK client library) communicates with your backend, which then makes authenticated requests to Mindset REST APIs.</p>
+<pre><code>Browser (Client Library)  →  Your Backend  →  Mindset REST API
+                               (API Key)
+</code></pre>
+<p>The client library should never have access to your API credentials or see internal IDs (notification IDs, PRO submission IDs).</p>
+<h2>Authentication</h2>
+<h3>API Key</h3>
+<p>You&#39;ll need a Clinic API Key.</p>
+<p><strong>How to get an API key:</strong></p>
+<ol>
+<li>Log into Mindset Provider App as a provider user</li>
+<li>Navigate to developer options in upper right menu</li>
+<li>Go to the &quot;API Keys&quot; section</li>
+<li>Click &quot;Create API Key&quot;</li>
+<li>Copy and securely store the key (it&#39;s only shown once)</li>
+</ol>
+<p><strong>Using the API key:</strong>
+Include it in the <code>Authorization</code> header of all requests:</p>
+<pre><code>Authorization: Bearer YOUR_API_KEY_HERE
+</code></pre>
+<h3>Clinic ID</h3>
+<p>You&#39;ll also need your <strong>Clinic ID</strong> (numeric). This can be found in the Provider App URL or clinic settings.</p>
+<h3>Environment URLs</h3>
+<table>
+<thead>
+<tr>
+<th>Environment</th>
+<th>Mindset REST API</th>
+<th>Provider App</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Staging</strong></td>
+<td><code>https://api-develop.mindsetmedical.com</code></td>
+<td><code>https://develop.mindsetmedical.com</code></td>
+</tr>
+<tr>
+<td><strong>Production</strong></td>
+<td><code>https://api.mindsetmedical.com</code></td>
+<td><code>https://app.mindsetmedical.com</code></td>
+</tr>
+</tbody></table>
+<h2>REST API Endpoints</h2>
+<p>The integration is organized into three major operations:</p>
+<ol>
+<li><strong><a href="#patient-management">Patient Management</a></strong> - Create, find, and update patient records</li>
+<li><strong><a href="#authorize-vitals-measurement">Authorize Vitals</a></strong> - Authorize WASM algorithm for measurement</li>
+<li><strong><a href="#submit-vitals-results">Submit Results</a></strong> - Save measurement results to Mindset</li>
+</ol>
+<hr>
+<h2>Patient Management</h2>
+<h3>Create Patient</h3>
+<p>Creates a new patient record in the Mindset system.</p>
+<p><strong>Endpoint:</strong> <code>POST /users/shadow</code></p>
+<p><strong>Request Headers:</strong></p>
+<pre><code>Content-Type: application/json
+Authorization: Bearer YOUR_API_KEY
+</code></pre>
+<p><strong>Request Body:</strong></p>
+<pre><code class="language-json">{
+  &quot;clinic_id&quot;: 123,
+  &quot;email&quot;: &quot;patient@example.com&quot;,
+  &quot;first_name&quot;: &quot;John&quot;,
+  &quot;last_name&quot;: &quot;Doe&quot;,
+  &quot;birth_date&quot;: &quot;1990-01-01&quot;,
+  &quot;member_id&quot;: &quot;MRN-12345&quot;
+}
+</code></pre>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>clinic_id</code> (required) - Your clinic ID (numeric)</li>
+<li><code>email</code> (required) - Patient email address</li>
+<li><code>first_name</code> (required) - Patient first name</li>
+<li><code>last_name</code> (required) - Patient last name</li>
+<li><code>birth_date</code> (required) - Patient birth date (YYYY-MM-DD format)</li>
+<li><code>member_id</code> (optional) - Your system&#39;s medical record number or patient identifier. Use this to link Mindset patient IDs to your existing patient records. Must be unique within your clinic.</li>
+</ul>
+<p><strong>Response (201 Created):</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;email&quot;: &quot;patient@example.com&quot;,
+  &quot;first_name&quot;: &quot;John&quot;,
+  &quot;last_name&quot;: &quot;Doe&quot;,
+  &quot;birth_date&quot;: &quot;1990-01-01&quot;,
+  &quot;created_at&quot;: &quot;2025-01-15T10:30:00Z&quot;
+}
+</code></pre>
+<p><strong>Important:</strong> Save the <code>id</code> from the response - you&#39;ll need it for authorization and submission.</p>
+<h3>Find Patient by Member ID</h3>
+<p>If you provided a <code>member_id</code> when creating the patient, you can retrieve the patient record using your external identifier.</p>
+<p><strong>Endpoint:</strong> <code>GET /clinics/{clinic_id}/patients?member_id={member_id}</code></p>
+<p><strong>Request Headers:</strong></p>
+<pre><code>Authorization: Bearer YOUR_API_KEY
+</code></pre>
+<p><strong>Query Parameters:</strong></p>
+<ul>
+<li><code>member_id</code> - Your system&#39;s medical record number</li>
+</ul>
+<p><strong>Example Request:</strong></p>
+<pre><code>GET /clinics/123/patients?member_id=MRN-12345
+</code></pre>
+<p><strong>Response (200 OK):</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;user_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+      &quot;email&quot;: &quot;patient@example.com&quot;,
+      &quot;first_name&quot;: &quot;John&quot;,
+      &quot;last_name&quot;: &quot;Doe&quot;,
+      &quot;birth_date&quot;: &quot;1990-01-01&quot;,
+      &quot;member_id&quot;: &quot;MRN-12345&quot;,
+      &quot;clinic_id&quot;: 123,
+      &quot;allow_data_access&quot;: true
+    }
+  ],
+  &quot;totalRecords&quot;: 1
+}
+</code></pre>
+<p><strong>Use case:</strong> This endpoint is useful when you need to look up a Mindset patient ID (<code>user_id</code>) using your own medical record number. For example, if a patient returns for another vitals measurement and you only have their MRN, you can use this endpoint to retrieve their Mindset <code>user_id</code> for authorization.</p>
+<h3>Update Patient</h3>
+<p>Update an existing patient record.</p>
+<p><strong>Endpoint:</strong> <code>PUT /users/pro/{user_id}</code></p>
+<p><strong>Request Headers:</strong></p>
+<pre><code>Content-Type: application/json
+Authorization: Bearer YOUR_API_KEY
+</code></pre>
+<p><strong>Request Body:</strong></p>
+<pre><code class="language-json">{
+  &quot;clinic_id&quot;: 123,
+  &quot;first_name&quot;: &quot;John&quot;,
+  &quot;last_name&quot;: &quot;Smith&quot;,
+  &quot;birth_date&quot;: &quot;1990-01-01&quot;,
+  &quot;email&quot;: &quot;john.smith@example.com&quot;,
+  &quot;cell_phone&quot;: &quot;+1-555-0100&quot;,
+  &quot;member_id&quot;: &quot;MRN-12345&quot;,
+  &quot;primary_language&quot;: &quot;en&quot;,
+  &quot;flag_id&quot;: null
+}
+</code></pre>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>clinic_id</code> (required) - Your clinic ID (numeric)</li>
+<li><code>first_name</code> (required) - Patient first name</li>
+<li><code>last_name</code> (required) - Patient last name</li>
+<li><code>birth_date</code> (required) - Patient birth date (YYYY-MM-DD format)</li>
+<li><code>email</code> (optional) - Patient email address</li>
+<li><code>cell_phone</code> (optional) - Patient phone number</li>
+<li><code>member_id</code> (optional) - Your system&#39;s medical record number</li>
+<li><code>primary_language</code> (optional) - Language code (e.g., &#39;en&#39;, &#39;es&#39;)</li>
+<li><code>flag_id</code> (optional) - Internal flag identifier</li>
+</ul>
+<p><strong>Response (200 OK):</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;
+}
+</code></pre>
+<hr>
+<h2>Authorize Vitals Measurement</h2>
+<p>This endpoint authorizes the WASM algorithm to perform a vitals measurement. Your backend calls this when the SDK&#39;s <code>authenticator</code> callback is invoked.</p>
+<p><strong>Endpoint:</strong> <code>POST /users/{user_id}/notifications</code></p>
+<p><strong>Request Headers:</strong></p>
+<pre><code>Content-Type: application/json
+Authorization: Bearer YOUR_API_KEY
+</code></pre>
+<p><strong>Request Body:</strong></p>
+<pre><code class="language-json">{
+  &quot;clinic_id&quot;: 123,
+  &quot;notification_type&quot;: &quot;VITAL-TRAC&quot;,
+  &quot;trigger_text&quot;: false,
+  &quot;pre_auth&quot;: true,
+  &quot;vitals_run_token&quot;: {created by vitals client}
+}
+</code></pre>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>clinic_id</code> - Your clinic ID (numeric)</li>
+<li><code>notification_type</code> - Must be <code>&quot;VITAL-TRAC&quot;</code></li>
+<li><code>trigger_text</code> - Set to <code>false</code> (no SMS notification)</li>
+<li><code>pre_auth</code> - Set to <code>true</code> (authorization request)</li>
+<li><code>vitals_run_token</code> - The <code>runToken</code> object from SDK&#39;s authenticator callback</li>
+</ul>
+<p><strong>Response (200 OK):</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;660e8400-e29b-41d4-a716-446655440001&quot;,
+  &quot;user_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;clinic_id&quot;: 123,
+  &quot;notification_type&quot;: &quot;VITAL-TRAC&quot;,
+  &quot;vitals_auth&quot;: {
+    &quot;authToken&quot;: &quot;encrypted-token-here&quot;,
+    &quot;vitals&quot;: [
+      {
+        &quot;tag&quot;: &quot;PR_MD&quot;,
+        &quot;max_session_time&quot;: 30
+      },
+      {
+        &quot;tag&quot;: &quot;RR_MD&quot;,
+        &quot;max_session_time&quot;: 30
+      }
+    ]
+  },
+  &quot;meta&quot;: {
+    &quot;pro_submission_id&quot;: 10001
+  },
+  &quot;created_at&quot;: &quot;2025-01-15T10:31:00Z&quot;
+}
+</code></pre>
+<p><strong>Important:</strong></p>
+<ul>
+<li>Return <code>vitals_auth</code> to the SDK&#39;s authenticator callback</li>
+<li>Store <code>meta.pro_submission_id</code> (numeric) on your server - you&#39;ll need it for submission</li>
+<li><strong>Never send</strong> the notification ID or pro_submission_id to the client library</li>
+</ul>
+<hr>
+<h2>Submit Vitals Results</h2>
+<p>This endpoint saves the measurement results to the Mindset system.</p>
+<p><strong>Endpoint:</strong> <code>PUT /users/{user_id}/pro_submissions/{pro_submission_id}</code></p>
+<p><strong>Request Headers:</strong></p>
+<pre><code>Content-Type: application/json
+Authorization: Bearer YOUR_API_KEY
+</code></pre>
+<p><strong>Request Body:</strong></p>
+<pre><code class="language-json">{
+  &quot;pro_type&quot;: &quot;VITAL-TRAC&quot;,
+  &quot;pro_data&quot;: {
+    &quot;data&quot;: {provided by vitals client stop event},
+    &quot;recorded_at&quot;: &quot;2025-01-15T10:32:00Z&quot;
+  }
+}
+</code></pre>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>{user_id}</code> - Patient ID from Create Patient response</li>
+<li><code>{pro_submission_id}</code> - Numeric ID from <code>meta.pro_submission_id</code> in authorization response</li>
+<li><code>pro_type</code> - Must be <code>&quot;VITAL-TRAC&quot;</code></li>
+<li><code>pro_data.data</code> - The complete vitals result object from SDK&#39;s <code>stop</code> event (passed through from client)</li>
+<li><code>pro_data.recorded_at</code> - ISO timestamp of when vitals were recorded</li>
+</ul>
+<p><strong>Response (200 OK):</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: 10001,
+  &quot;user_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;,
+  &quot;pro_type&quot;: &quot;VITAL-TRAC&quot;,
+  &quot;completion_date&quot;: &quot;2025-01-15T10:32:00Z&quot;,
+  &quot;pro_score_data&quot;: {
+    &quot;string&quot;: &quot;HR-MD: 72 | BR-MD: 16&quot;,
+    &quot;detail&quot;: { ... }
+  },
+  &quot;created_at&quot;: &quot;2025-01-15T10:31:00Z&quot;,
+  &quot;updated_at&quot;: &quot;2025-01-15T10:32:00Z&quot;
+}
+</code></pre>
+<p><strong>Note:</strong> The SDK provides the complete VITAL-TRAC data structure in the <code>stop</code> event - just pass it directly as <code>pro_data.data</code>.</p>
+<hr>
+<h2>Error Responses</h2>
+<p>All endpoints return standard HTTP status codes:</p>
+<h3>Common Errors</h3>
+<p><strong>401 Unauthorized</strong></p>
+<pre><code class="language-json">{
+  &quot;statusCode&quot;: 401,
+  &quot;error&quot;: &quot;Unauthorized&quot;,
+  &quot;message&quot;: &quot;Invalid authentication credentials&quot;
+}
+</code></pre>
+<ul>
+<li>Check that your API key is correct and included in the Authorization header</li>
+<li>Verify the API key has <code>PROVIDER_SERVICE</code> scope</li>
+</ul>
+<p><strong>403 Forbidden</strong></p>
+<pre><code class="language-json">{
+  &quot;statusCode&quot;: 403,
+  &quot;error&quot;: &quot;Forbidden&quot;,
+  &quot;message&quot;: &quot;Insufficient permissions&quot;
+}
+</code></pre>
+<ul>
+<li>API key doesn&#39;t have required scope (<code>PROVIDER_SERVICE</code>)</li>
+<li>Patient doesn&#39;t have permission to access the clinic</li>
+</ul>
+<p><strong>400 Bad Request</strong></p>
+<pre><code class="language-json">{
+  &quot;statusCode&quot;: 400,
+  &quot;error&quot;: &quot;Bad Request&quot;,
+  &quot;message&quot;: &quot;Invalid request payload&quot;,
+  &quot;validation&quot;: {
+    &quot;source&quot;: &quot;payload&quot;,
+    &quot;keys&quot;: [&quot;clinic_id&quot;]
+  }
+}
+</code></pre>
+<ul>
+<li>Check request body format</li>
+<li>Verify all required fields are present</li>
+</ul>
+<p><strong>404 Not Found</strong></p>
+<pre><code class="language-json">{
+  &quot;statusCode&quot;: 404,
+  &quot;error&quot;: &quot;Not Found&quot;,
+  &quot;message&quot;: &quot;Resource not found&quot;
+}
+</code></pre>
+<ul>
+<li>Patient ID doesn&#39;t exist</li>
+<li>PRO submission ID doesn&#39;t exist</li>
+</ul>
+<hr>
+<h2>Security Best Practices</h2>
+<ol>
+<li><p><strong>Never expose credentials client-side</strong></p>
+<ul>
+<li>API keys and clinic IDs should only exist on your server</li>
+<li>Client library should call your backend, which then calls Mindset REST API</li>
+</ul>
+</li>
+<li><p><strong>Store PRO submission IDs securely</strong></p>
+<ul>
+<li>Keep the mapping between patient IDs and PRO submission IDs on your server</li>
+<li>Never send PRO submission IDs to the client library</li>
+</ul>
+</li>
+<li><p><strong>Use HTTPS</strong></p>
+<ul>
+<li>All REST API calls must use HTTPS</li>
+<li>Never send API keys over unencrypted connections</li>
+</ul>
+</li>
+<li><p><strong>Validate API key scope</strong></p>
+<ul>
+<li>Ensure your API key has <code>PROVIDER_SERVICE</code> scope</li>
+<li>This scope allows submitting PRO data on behalf of patients</li>
+</ul>
+</li>
+<li><p><strong>Secure API key storage</strong></p>
+<ul>
+<li>Use environment variables for API keys</li>
+<li>Never commit API keys to source control</li>
+<li>Rotate keys periodically</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>Related Documentation</h2>
+<ul>
+<li><a href="integration_guide.html">Integration Guide</a> - Complete SDK integration guide</li>
+<li><a href="index.html">README</a> - SDK client library reference</li>
+<li><a href="examples_vanilla-js.html">Vanilla JS Example</a> - Working example application</li>
+</ul>
+
+  </main>
+</body>
+</html>

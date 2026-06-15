@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture - Vitals Web SDK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  
+    <nav class="nav">
+      <div class="nav-content">
+        <h1>Vitals Web SDK <span class="version">v2.6.0</span></h1>
+        <div class="nav-links">
+          <a href="index.html" >Overview</a>
+          <a href="integration_guide.html" >Integration Guide</a>
+          <a href="mindset_rest_apis.html" >REST APIs</a>
+          <a href="architecture.html" class="active">Architecture</a>
+          <a href="examples_vanilla-js.html" >Example</a>
+        </div>
+      </div>
+    </nav>
+  
+  <main class="content">
+    <h1>Vitals Web SDK Architecture</h1>
+<p>This document describes the internal architecture of the Vitals Web SDK, how components communicate, and how video frames flow through the system for vital signs measurement.</p>
+<p><strong>Related Documentation:</strong></p>
+<ul>
+<li><a href="index.html">README</a> - SDK features and client library reference</li>
+<li><a href="integration_guide.html">Integration Guide</a> - Step-by-step integration</li>
+<li><a href="mindset_rest_apis.html">Mindset REST APIs</a> - Backend REST API reference for patient management, authorization, and vitals submission</li>
+</ul>
+<h2>Overview</h2>
+<p>The Vitals Web SDK is a browser-based vital signs measurement system that uses facial photoplethysmography (PPG) to measure pulse rate, respiratory rate, oxygen saturation, and blood pressure through a standard webcam.</p>
+<h3>High-Level Architecture</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────────────┐
+│                         User Application                            │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │  import { createVitalClient } from &#39;@mindset-vitals/web-sdk&#39;  │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│                      Main Thread (Browser)                            │
+│                                                                       │
+│  ┌──────────────────┐        ┌──────────────────┐                     │
+│  │  VitalClient     │◄──────►│  WorkerManager   │                     │
+│  │  (Coordinator)   │        │  (RPC Manager)   │                     │
+│  └────────┬─────────┘        └────────┬─────────┘                     │
+│           │                           │                               │
+│           │                           │ postMessage (rawr RPC)        │
+│  ┌────────▼─────────┐                 │                               │
+│  │  StatusManager   │                 │                               │
+│  │  (State)         │                 │                               │
+│  └──────────────────┘                 │                               │
+│                                       │                               │
+│  ┌────────────────────────────────────┼───────────────────────────┐   │
+│  │  &lt;video&gt; Element                   │                           │   │
+│  │  ┌──────────────────────────────┐  │                           │   │
+│  │  │  requestVideoFrameCallback() │  │                           │   │
+│  │  │         ▼                    │  │                           │   │
+│  │  │  createImageBitmap()         │  │                           │   │
+│  │  └──────────────────────────────┘  │                           │   │
+│  └────────────────────────────────────┼───────────────────────────┘   │
+└───────────────────────────────────────┼───────────────────────────────┘
+                                        │
+                                        │ ImageBitmap (transferable)
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Web Worker Thread                              │
+│                                                                     │
+│  ┌──────────────────┐        ┌──────────────────┐                   │
+│  │  Worker.js       │◄──────►│  Rawr RPC Peer   │                   │
+│  │  (Orchestrator)  │        │  (Bidirectional) │                   │
+│  └────────┬─────────┘        └──────────────────┘                   │
+│           │                                                         │
+│           ├─────────► MediaPipe Face Detection                      │
+│           │           (WASM + TensorFlow Lite)                      │
+│           │                                                         │
+│           ├─────────► Image Segmentation                            │
+│           │           (Skin detection)                              │
+│           │                                                         │
+│           └─────────► Vital Core Algorithm (WASM)                   │
+│                       • Pulse Rate (PR_MD/PR_GW)                    │
+│                       • Respiratory Rate (RR_MD/RR_GW)              │
+│                       • Oxygen Saturation (SPO2_MD/SPO2_GW)         │
+│                       • Blood Pressure (BP_MD/BP_GW)                │
+│                                                                     │
+│  Emits: &#39;signs&#39; messages                                            │
+└─────────────────────────────────────────────────────────────────────┘
+                                         │
+                                         │ postMessage (results)
+                                         │
+                                         ▼
+                         ┌───────────────────────────┐
+                         │  User Event Handlers      │
+                         │  • on(&#39;signsMessage&#39;)     │
+                         │  • on(&#39;stop&#39;)             │
+                         │  • on(&#39;timeLeft&#39;)         │
+                         └───────────────────────────┘
+</code></pre>
+<h2>How It Works</h2>
+<h3>VitalClient - Your Main Interface</h3>
+<p>This is what you interact with. It provides methods like:</p>
+<ul>
+<li><code>init()</code> - Initialize the Web SDK</li>
+<li><code>authorize()</code> - Authorize with your backend</li>
+<li><code>start()</code> - Begin measurement</li>
+<li><code>stop()</code> - End measurement</li>
+</ul>
+<p>It also emits events you listen to:</p>
+<ul>
+<li><code>&#39;ready&#39;</code> - Web SDK is initialized</li>
+<li><code>&#39;signsMessage&#39;</code> - Real-time status updates</li>
+<li><code>&#39;stop&#39;</code> - Measurement complete with results</li>
+</ul>
+<h3>Behind the Scenes</h3>
+<p>The Web SDK runs heavy processing in a Web Worker to keep your UI responsive:</p>
+<ol>
+<li><strong>Video frames</strong> are captured from your <code>&lt;video&gt;</code> element</li>
+<li><strong>Worker</strong> processes each frame for face detection and vital signs</li>
+<li><strong>Events</strong> are emitted back to your application with status and results</li>
+</ol>
+<p>That&#39;s it - you don&#39;t need to manage the worker or understand the internals.</p>
+<h2>Measurement Flow</h2>
+<pre><code>1. Initialize
+   ├─► await vitalClient.init()
+   └─► Listen for &#39;ready&#39; event
+
+2. Authorize
+   ├─► await vitalClient.authorize()
+   ├─► Your backend → Mindset API
+   └─► Listen for &#39;authorizedVitals&#39; event
+
+3. Start Measurement
+   ├─► await vitalClient.start([&#39;PR_MD&#39;, &#39;RR_MD&#39;], videoElement)
+   ├─► Web SDK captures video frames automatically
+   ├─► Listen for &#39;signsMessage&#39; events (real-time status)
+   └─► Listen for &#39;timeLeft&#39; events (countdown)
+
+4. Complete
+   ├─► Measurement stops automatically when done
+   ├─► OR call await vitalClient.stop() manually
+   └─► Receive results via &#39;stop&#39; event
+</code></pre>
+<h3>Automatic Session End</h3>
+<p>The Web SDK automatically stops measurement when:</p>
+<ul>
+<li>All selected vitals have been successfully measured</li>
+<li>Maximum session time is reached</li>
+<li>You manually call <code>stop()</code></li>
+</ul>
+<p>Status codes in <code>signsMessage</code> events indicate when each vital is ready:</p>
+<ul>
+<li><code>S-HRT-061</code> - Pulse rate ready</li>
+<li><code>S-RES-070</code> - Respiratory rate ready</li>
+<li><code>S-BPR-090</code> - Blood pressure ready</li>
+<li><code>S-SPO-100</code> - Oxygen saturation ready</li>
+</ul>
+<h2>Distribution Structure</h2>
+<pre><code>dist/
+├── index.js                    # ESM bundle
+├── index.umd.js                # UMD bundle (browser global)
+├── worker.js                   # Web Worker bundle
+├── webvital.wasm           # Vital Core algorithm
+├── webvital.js             # WASM glue code
+├── webvital.data           # WASM data file
+├── blaze_face_short_range.tflite
+├── selfie_multiclass_256x256.tflite
+└── @mediapipe/
+   └── tasks-vision/
+      └── wasm/
+            ├── vision_wasm_internal.wasm
+            └── vision_wasm_internal.js
+</code></pre>
+<h2>Performance</h2>
+<p>The Web SDK uses a Web Worker to run all heavy computation (face detection, vital signs processing) off the main thread. This keeps your UI responsive even during intensive processing.</p>
+<p>Benefits:</p>
+<ul>
+<li>No frame drops in your video feed</li>
+<li>UI remains interactive</li>
+<li>Efficient memory usage</li>
+</ul>
+<h2>Authentication</h2>
+<p>The Web SDK uses a callback pattern for authorization, giving you full control over how you communicate with your backend:</p>
+<pre><code class="language-javascript">async function authenticator(runToken) {
+  // Call YOUR backend
+  const response = await fetch(&#39;/api/authorize&#39;, {
+    method: &#39;POST&#39;,
+    body: JSON.stringify({ runToken })
+  });
+
+  const data = await response.json();
+  return data.vitalCoreAuth; // Return encrypted auth from Mindset REST API
+}
+</code></pre>
+<p>Your backend calls the Mindset REST API with the <code>runToken</code>, receives an encrypted authorization response, and returns it to the client library.</p>
+<h2>Error Handling</h2>
+<h3>Initialization Errors</h3>
+<ul>
+<li>Worker fails to load → <code>error</code> event</li>
+<li>Models fail to load → logged to console</li>
+<li>Timeout on ready signal → Promise rejection</li>
+</ul>
+<h3>Runtime Errors</h3>
+<ul>
+<li>Face not detected → Status code in <code>signsMessage</code></li>
+<li>Poor lighting → Status code in <code>signsMessage</code></li>
+<li>Authorization failed → Promise rejection</li>
+<li>Worker crash → <code>error</code> event</li>
+</ul>
+<h3>Recovery Strategies</h3>
+<ul>
+<li>User can retry authorization</li>
+<li>Face detection errors are transient (wait for better positioning)</li>
+<li>Worker can be destroyed and recreated via <code>destroy()</code> + <code>init()</code></li>
+</ul>
+<h2>Browser Compatibility &amp; System Requirements</h2>
+<h3>Supported Browsers</h3>
+<table>
+<thead>
+<tr>
+<th>Browser</th>
+<th>Minimum Version</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Chrome</td>
+<td>114+ (recommended)</td>
+</tr>
+<tr>
+<td>Safari</td>
+<td>16+ (iOS 18+ / iPadOS 17+ / macOS Ventura or later)</td>
+</tr>
+<tr>
+<td>Edge</td>
+<td>123+</td>
+</tr>
+<tr>
+<td>Samsung Internet</td>
+<td>27+</td>
+</tr>
+</tbody></table>
+<p><strong>Note:</strong> Firefox is not supported.</p>
+<h3>System Requirements</h3>
+<p><strong>Minimum RAM:</strong> 6 GB</p>
+<h3>Required Browser Features</h3>
+<ul>
+<li>ES Modules (import/export)</li>
+<li>Web Workers</li>
+<li>WebAssembly</li>
+<li>getUserMedia() API</li>
+<li>requestVideoFrameCallback() API</li>
+<li>createImageBitmap() API</li>
+<li>OffscreenCanvas (optimal, fallback available)</li>
+</ul>
+<h2>Security Considerations</h2>
+<h3>WASM Authorization</h3>
+<ul>
+<li>Run token generated in WASM (not tamperable)</li>
+<li>Backend validates with Mindset API</li>
+<li>Encrypted auth response</li>
+<li>WASM validates auth before processing</li>
+</ul>
+<h3>CSP (Content Security Policy)</h3>
+<p>If your application uses a Content Security Policy, you may need to allow:</p>
+<ul>
+<li>Web Workers (<code>worker-src</code> or <code>script-src</code>)</li>
+<li>WebAssembly execution (<code>script-src &#39;wasm-unsafe-eval&#39;</code> in some browsers)</li>
+<li>Network requests to your backend (<code>connect-src</code>)</li>
+</ul>
+<h3>Data Privacy</h3>
+<ul>
+<li>All processing happens locally (client-side)</li>
+<li>No video data sent to servers</li>
+<li>Only measurement results can be transmitted</li>
+<li>User controls data sharing</li>
+</ul>
+<h2>Data Collection &amp; Privacy</h2>
+<h3>Information Collected</h3>
+<p>The Web SDK collects device and system information for diagnostics (device memory, CPU, browser type, WebAssembly capabilities), processes video frames locally for vital signs measurement, and generates measurement results.</p>
+<h3>What Gets Transmitted</h3>
+<ul>
+<li>Vital signs results (pulse rate, respiratory rate, blood pressure, SpO2)</li>
+<li>Data quality metrics and status codes</li>
+<li>Session metadata (timestamps, device info)</li>
+</ul>
+<h3>What Stays Local</h3>
+<ul>
+<li>Raw video frames (never uploaded)</li>
+<li>Face detection data</li>
+<li>Segmentation masks</li>
+<li>All video processing happens in the browser</li>
+</ul>
+<h3>Privacy &amp; Security</h3>
+<ul>
+<li>Camera access requires explicit user permission</li>
+<li>All processing runs locally via WebAssembly</li>
+<li>Video data is never stored or transmitted</li>
+<li>Results transmitted via HTTPS encryption</li>
+<li>Integrators must obtain user consent and implement appropriate security controls</li>
+</ul>
+<hr>
+<p><em>For integration instructions, see <a href="integration_guide.html">integration_guide.md</a></em>
+<em>For API reference, see <a href="index.html">README.md</a></em></p>
+
+  </main>
+</body>
+</html>

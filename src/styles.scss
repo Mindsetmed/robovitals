@@ -1,0 +1,73 @@
+html,
+body {
+  height: 100%;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: #e6f2fa;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body.hg-landing-page {
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  background-color: #e6f2fa;
+  background-image: url('/assets/images/mobile.png');
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: scroll;
+}
+
+@media (max-width: 767px) and (orientation: landscape) {
+  body.hg-landing-page {
+    background-image: url('/assets/images/tablet-landscape.png');
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) and (orientation: portrait) {
+  body.hg-landing-page {
+    background-image: url('/assets/images/tablet-portrait.png');
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) and (orientation: landscape) {
+  body.hg-landing-page {
+    background-image: url('/assets/images/tablet-landscape.png');
+  }
+}
+
+@media (min-width: 1200px) {
+  body.hg-landing-page {
+    background-image: url('/assets/images/landing-cover.png');
+  }
+}
+
+body.hg-capture-page {
+  background: #000;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+app-root {
+  display: block;
+  width: 100%;
+  min-height: 100%;
+}

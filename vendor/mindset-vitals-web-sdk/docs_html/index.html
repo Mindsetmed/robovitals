@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overview - Vitals Web SDK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  
+    <nav class="nav">
+      <div class="nav-content">
+        <h1>Vitals Web SDK <span class="version">v2.6.0</span></h1>
+        <div class="nav-links">
+          <a href="index.html" class="active">Overview</a>
+          <a href="integration_guide.html" >Integration Guide</a>
+          <a href="mindset_rest_apis.html" >REST APIs</a>
+          <a href="architecture.html" >Architecture</a>
+          <a href="examples_vanilla-js.html" >Example</a>
+        </div>
+      </div>
+    </nav>
+  
+  <main class="content">
+    <h1>Vitals Web SDK</h1>
+<p>A JavaScript SDK for camera-based vital signs measurement.</p>
+<h2>Overview</h2>
+<p>The Vitals Web SDK enables browser-based measurement of vitals from a standard webcam. Once authorized, the client library takes an HTML video element, processes frames, and returns vital measurements.</p>
+<p><strong>Architecture:</strong></p>
+<ul>
+<li><strong>Client Library</strong> (Browser) - Captures and processes video frames, returns vital measurements</li>
+<li><strong>Your Backend</strong> (Server) - Handles authorization and submits results to Mindset REST API</li>
+<li><strong>Security</strong> - All credentials and sensitive operations stay server-side</li>
+</ul>
+<p>The SDK runs processing in a Web Worker to keep your UI responsive during measurement.</p>
+<h2>Documentation</h2>
+<ul>
+<li><strong><a href="integration_guide.html">Integration Guide</a></strong> - Complete guide for integrating the SDK into your application (includes backend setup)</li>
+<li><strong><a href="mindset_rest_apis.html">Mindset REST APIs</a></strong> - Backend REST API reference for patient management, authorization, and vitals submission</li>
+<li><strong><a href="examples_vanilla-js.html">Vanilla JS Example</a></strong> - Reference implementation with patient creation, authorization, and vitals submission</li>
+<li><strong><a href="architecture.html">Architecture</a></strong> - Technical architecture, data flow, and internal design</li>
+</ul>
+<p><strong>Note:</strong> This SDK requires both frontend (client library) and backend (server) components. The client library captures vitals, and your backend handles all Mindset REST API communication using your clinic API key. See the <a href="integration_guide.html">Integration Guide</a> and <a href="mindset_rest_apis.html">Mindset REST APIs</a> for complete setup.</p>
+<p>The Vanilla JS example is the canonical integration path. Its backend endpoint names are used throughout the docs:</p>
+<pre><code>SDK client -&gt; your backend endpoint -&gt; Mindset REST API
+
+/patient/create  -&gt; POST /users/shadow
+/auth            -&gt; POST /users/{patientId}/notifications
+/patient/vitals  -&gt; PUT /users/{patientId}/pro_submissions/{proSubmissionId}
+</code></pre>
+<p>The <code>/auth</code> response from Mindset includes both a notification <code>id</code> and <code>meta.pro_submission_id</code>. Store <code>meta.pro_submission_id</code> on your backend and use it for the later <code>/pro_submissions/{proSubmissionId}</code> submission. Do not send the clinic API key, notification ID, or PRO submission ID to the browser.</p>
+<h2>Features</h2>
+<ul>
+<li><strong>Camera-based measurement</strong> - No special hardware required</li>
+<li><strong>MediaPipe face detection</strong> - High-accuracy facial landmark detection</li>
+<li><strong>WebAssembly powered</strong> - High-performance vital signs algorithms</li>
+<li><strong>Encrypted authorization</strong> - Secure WASM licensing with RSA encryption</li>
+<li><strong>Event-driven client library</strong> - Simple callback-based event system</li>
+<li><strong>Multiple formats</strong> - ESM, UMD, and bundled web worker</li>
+<li><strong>Framework agnostic</strong> - Works with React, Vue, Angular, or vanilla JS</li>
+</ul>
+<h2>Installation</h2>
+<pre><code class="language-bash">npm install @mindset-vitals/web-sdk
+</code></pre>
+<p>Or include via script tag:</p>
+<pre><code class="language-html">&lt;script src=&quot;./dist/index.umd.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+  const { createVitalClient } = window.VitalSDK;
+  // Use createVitalClient as shown below
+&lt;/script&gt;
+</code></pre>
+<h2>Quick Start</h2>
+<pre><code class="language-javascript">import { createVitalClient } from &#39;@mindset-vitals/web-sdk&#39;;
+
+// 1. Create authenticator callback
+async function authenticator(runToken) {
+  // Call your backend to authorize the WASM algorithm
+  const response = await fetch(&#39;/api/auth&#39;, {
+    method: &#39;POST&#39;,
+    body: JSON.stringify({ runToken })
+  });
+  const data = await response.json();
+  return data.vitalCoreAuth; // Return encrypted auth response
+}
+
+// 2. Initialize SDK
+const vitalClient = createVitalClient({
+  workerDirectory: &#39;/dist&#39;,  // Path to worker.js and models
+  authenticator              // Your auth callback
+});
+
+// 3. Set up event listeners
+vitalClient.on(&#39;ready&#39;, () =&gt; {
+  console.log(&#39;SDK ready&#39;);
+});
+
+vitalClient.on(&#39;authorizedVitals&#39;, (vitals) =&gt; {
+  console.log(&#39;Authorized to measure:&#39;, vitals);
+  // [&#39;PR_MD&#39;, &#39;RR_MD&#39;, &#39;SPO2_MD&#39;, ...]
+});
+
+vitalClient.on(&#39;timeLeft&#39;, (data) =&gt; {
+  console.log(`${data.timeLeft}s remaining (${Math.round(data.percentComplete * 100)}% complete)`);
+});
+
+vitalClient.on(&#39;signsMessage&#39;, (message) =&gt; {
+  // Real-time warnings/guidance
+  console.log(&#39;Status:&#39;, message.dataStatus);
+});
+
+vitalClient.on(&#39;stop&#39;, async (result) =&gt; {
+  console.log(&#39;Measurement complete:&#39;, result);
+  // SDK returns complete VITAL-TRAC data structure - ready to submit!
+  // {
+  //   vitals: { vitals: { PR_MD: {...}, RR_MD: {...} } },
+  //   signsMsgs: { ... },
+  //   finalVitalsMeasurementValues: { PR_MD: {...}, ... },
+  //   prevVitals: [],
+  //   prevSignsMsgs: [],
+  //   noValidMeasurements: false,
+  //   webAppVersion: &#39;1.0.0&#39;,
+  //   frameCollectionMethod: &#39;web-sdk&#39;,
+  //   timestamp: ...
+  // }
+
+  // Submit to your backend
+  await fetch(&#39;/api/vitals&#39;, {
+    method: &#39;POST&#39;,
+    body: JSON.stringify({ vitals: result })
+  });
+});
+
+// 4. Initialize
+await vitalClient.init();
+
+// 5. Start preview mode (optional - shows camera without measuring)
+await vitalClient.startPreviewMode(videoElement);
+
+// 6. Authorize and start measurement
+await vitalClient.authorize();
+await vitalClient.start([&#39;PR_MD&#39;, &#39;RR_MD&#39;], videoElement);
+
+// 7. Stop measurement (or it stops automatically)
+const results = await vitalClient.stop();
+</code></pre>
+<p><strong>Your backend submits to Mindset REST API:</strong></p>
+<pre><code class="language-javascript">// Server-side - submit vitals using clinic API key
+app.post(&#39;/api/vitals&#39;, async (req, res) =&gt; {
+  const { patientId, vitals } = req.body;
+
+  // Stored during authorization from notificationData.meta.pro_submission_id
+  const proSubmissionId = proSubmissionStore.get(patientId);
+
+  // SDK provides complete VITAL-TRAC structure - just pass it through!
+  await fetch(`${MINDSET_API_URL}/users/${patientId}/pro_submissions/${proSubmissionId}`, {
+    method: &#39;PUT&#39;,
+    headers: {
+      &#39;Authorization&#39;: `Bearer ${MINDSET_API_KEY}`,
+      &#39;Content-Type&#39;: &#39;application/json&#39;
+    },
+    body: JSON.stringify({
+      pro_type: &#39;VITAL-TRAC&#39;,
+      pro_data: {
+        data: vitals, // SDK provides everything ready for submission
+        recorded_at: new Date().toISOString()
+      }
+    })
+  });
+
+  res.json({ success: true });
+});
+</code></pre>
+<h2>Client Library Reference</h2>
+<h3><code>createVitalClient(config)</code></h3>
+<p>Creates a new Vital Client instance.</p>
+<p><strong>Configuration:</strong></p>
+<pre><code class="language-javascript">{
+  workerDirectory: &#39;/dist&#39;,     // Path to worker.js and static assets
+  authenticator: Function       // Callback: (runToken) =&gt; authResponse
+}
+</code></pre>
+<p><strong>Returns:</strong> VitalClient instance</p>
+<h3>VitalClient Methods</h3>
+<h4><code>init()</code></h4>
+<p>Initializes the SDK and loads the web worker.</p>
+<pre><code class="language-javascript">await vitalClient.init();
+</code></pre>
+<h4><code>authorize()</code></h4>
+<p>Authorizes the WASM algorithm. Calls your authenticator callback with the runToken.</p>
+<pre><code class="language-javascript">await vitalClient.authorize();
+</code></pre>
+<p><strong>Note:</strong> Authorization is required before starting measurements.</p>
+<h4><code>start(selectedVitals, videoElement)</code></h4>
+<p>Starts a measurement session.</p>
+<pre><code class="language-javascript">await vitalClient.start([&#39;PR_MD&#39;, &#39;RR_MD&#39;], videoElement);
+</code></pre>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>selectedVitals</code>: Array of vital tags to measure (e.g., <code>[&#39;PR_MD&#39;, &#39;RR_MD&#39;, &#39;SPO2_MD&#39;, &#39;BP_MD&#39;]</code>)</li>
+<li><code>videoElement</code>: HTML video element for camera feed</li>
+</ul>
+<h4><code>stop()</code></h4>
+<p>Stops the current measurement and returns results.</p>
+<pre><code class="language-javascript">const result = await vitalClient.stop();
+// { vitals: { PR_MD: {...}, RR_MD: {...} }, timestamp: 1234567890 }
+</code></pre>
+<h4><code>startPreviewMode(videoElement)</code></h4>
+<p>Starts preview mode (camera active, no measurement).</p>
+<pre><code class="language-javascript">await vitalClient.startPreviewMode(videoElement);
+</code></pre>
+<h4><code>stopPreviewMode()</code></h4>
+<p>Stops preview mode.</p>
+<pre><code class="language-javascript">await vitalClient.stopPreviewMode();
+</code></pre>
+<h4><code>setExtendedLogs(enabled)</code></h4>
+<p>Enables or disables extended logging for debugging.</p>
+<pre><code class="language-javascript">await vitalClient.setExtendedLogs(true);
+</code></pre>
+<h4><code>getVersion()</code></h4>
+<p>Returns the SDK version string.</p>
+<pre><code class="language-javascript">const version = await vitalClient.getVersion();
+</code></pre>
+<h4><code>destroy()</code></h4>
+<p>Cleans up and terminates the worker.</p>
+<pre><code class="language-javascript">vitalClient.destroy();
+</code></pre>
+<h3>Events</h3>
+<p>The SDK uses an event-driven architecture. Subscribe using <code>on()</code>, unsubscribe with <code>off()</code>.</p>
+<h4><code>ready</code></h4>
+<p>Fired when SDK initialization is complete.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;ready&#39;, () =&gt; {
+  console.log(&#39;SDK ready&#39;);
+});
+</code></pre>
+<h4><code>authorizedVitals</code></h4>
+<p>Fired after successful authorization with the list of authorized vitals.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;authorizedVitals&#39;, (vitals) =&gt; {
+  console.log(&#39;Can measure:&#39;, vitals);
+  // [&#39;PR_MD&#39;, &#39;RR_MD&#39;, ...]
+});
+</code></pre>
+<h4><code>maxSessionTime</code></h4>
+<p>Fired after authorization with maximum session duration (seconds).</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;maxSessionTime&#39;, (duration) =&gt; {
+  console.log(&#39;Max session:&#39;, duration, &#39;seconds&#39;);
+});
+</code></pre>
+<h4><code>start</code></h4>
+<p>Fired when measurement starts.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;start&#39;, ({ selectedVitals }) =&gt; {
+  console.log(&#39;Measuring:&#39;, selectedVitals);
+});
+</code></pre>
+<h4><code>stop</code></h4>
+<p>Fired when measurement completes. SDK provides complete VITAL-TRAC data structure ready for submission.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;stop&#39;, (result) =&gt; {
+  console.log(&#39;Results:&#39;, result);
+  // Complete VITAL-TRAC structure - ready to submit!
+  // {
+  //   vitals: { vitals: { PR_MD: {...}, RR_MD: {...}, ... } },
+  //   signsMsgs: { timestamp1: {...}, ... },
+  //   finalVitalsMeasurementValues: { PR_MD: {...}, ... },
+  //   prevVitals: [],
+  //   prevSignsMsgs: [],
+  //   noValidMeasurements: false,
+  //   webAppVersion: &#39;1.0.0&#39;,
+  //   frameCollectionMethod: &#39;web-sdk&#39;,
+  //   timestamp: 1234567890
+  // }
+});
+</code></pre>
+<h4><code>timeLeft</code></h4>
+<p>Fired every second during measurement with progress information.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;timeLeft&#39;, (data) =&gt; {
+  console.log(`${data.timeLeft}s remaining`);
+  updateProgressBar(data.percentComplete); // 0 to 1
+  // data = { timeLeft, maxTime, percentComplete, percentRemaining }
+});
+</code></pre>
+<h4><code>signsMessage</code></h4>
+<p>Fired during measurement with real-time quality/guidance messages.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;signsMessage&#39;, (message) =&gt; {
+  // message.dataStatus contains warning/error codes and messages
+  message.dataStatus.forEach((dataStatusObj) =&gt; {
+    if (dataStatusObj.severity === &#39;warning&#39;) {
+      console.log(`Code ${dataStatusObj.code}: ${dataStatusObj.message}`);
+    }
+  });
+});
+</code></pre>
+<p><strong>Common Status Codes:</strong></p>
+<ul>
+<li><code>E-FDM-041</code> - Face not detected</li>
+<li><code>E-FDM-042</code> - Face not centered</li>
+<li><code>E-DQM-021</code> - Too much movement</li>
+<li><code>E-DQM-022</code> - Poor lighting</li>
+<li><code>W-RES-073</code> - Face not centered</li>
+<li><code>W-RES-076</code> - Face not centered</li>
+<li><code>W-RES-078</code> - Face not centered</li>
+<li><code>W-RES-079</code> - Face too far from camera</li>
+<li><code>W-RES-080</code> - Face too close to camera</li>
+<li><code>S-HRT-061</code> - Pulse rate ready</li>
+<li><code>S-RES-070</code> - Respiratory rate ready</li>
+<li><code>S-BPR-090</code> - Blood pressure ready</li>
+<li><code>S-SPO-100</code> - Oxygen saturation ready</li>
+</ul>
+<h4><code>previewModeStart</code> / <code>previewModeStop</code></h4>
+<p>Fired when preview mode starts/stops.</p>
+<h4><code>guideCoordinates</code></h4>
+<p>Fired when face guide coordinates are calculated (during preview or measurement start).</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;guideCoordinates&#39;, (coords) =&gt; {
+  console.log(&#39;Guide area:&#39;, coords);
+  // coords = { x, y, width, height }
+});
+</code></pre>
+<h4><code>error</code></h4>
+<p>Fired on SDK errors.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;error&#39;, (error) =&gt; {
+  console.error(&#39;SDK error:&#39;, error);
+});
+</code></pre>
+<h4><code>log</code></h4>
+<p>Fired for debug/diagnostic messages from the worker.</p>
+<pre><code class="language-javascript">vitalClient.on(&#39;log&#39;, (message) =&gt; {
+  console.log(&#39;Worker log:&#39;, message);
+});
+</code></pre>
+<h2>Authenticator Pattern</h2>
+<p>The SDK requires an authenticator callback that handles WASM authorization. This keeps the SDK protocol-agnostic and lets you control authorization logic.</p>
+<h3>Backend Integration</h3>
+<p>Your backend should:</p>
+<ol>
+<li>Accept the <code>runToken</code> from the SDK</li>
+<li>Call the Mindset REST API to authorize the WASM</li>
+<li>Return the encrypted auth response</li>
+</ol>
+<p><strong>Example Backend (Express):</strong></p>
+<pre><code class="language-javascript">app.post(&#39;/auth&#39;, async (req, res) =&gt; {
+  const { runToken } = req.body;
+
+  // Call Mindset REST API
+  const response = await fetch(`${MINDSET_API_URL}/users/${patientId}/notifications`, {
+    method: &#39;POST&#39;,
+    headers: { &#39;Authorization&#39;: `Bearer ${API_KEY}` },
+    body: JSON.stringify({
+      clinic_id: CLINIC_ID,
+      notification_type: &#39;VITAL-TRAC&#39;,
+      pre_auth: true,
+      trigger_text: false,
+      vitals_run_token: runToken  // Pass runToken to REST API
+    })
+  });
+
+  const data = await response.json();
+
+  res.json({
+    success: true,
+    vitalCoreAuth: data.vitals_auth  // Return encrypted tokens
+  });
+});
+</code></pre>
+<p><strong>Frontend Authenticator:</strong></p>
+<pre><code class="language-javascript">async function authenticator(runToken) {
+  const response = await fetch(&#39;/auth&#39;, {
+    method: &#39;POST&#39;,
+    headers: { &#39;Content-Type&#39;: &#39;application/json&#39; },
+    body: JSON.stringify({ runToken })
+  });
+
+  const data = await response.json();
+  return data.vitalCoreAuth;
+}
+</code></pre>
+<h2>Vital Signs Results</h2>
+<p>The SDK automatically formats results in complete VITAL-TRAC structure - ready to submit!</p>
+<pre><code class="language-javascript">{
+  vitals: {
+    vitals: {  // Double-nested structure for VITAL-TRAC compatibility
+      PR_MD: { hr: 72, confidence: 0.95, ... },
+      PR_GW: { hr: 71, confidence: 0.92, ... },
+      RR_MD: { rr: 16, confidence: 0.88, ... },
+      RR_GW: { rr: 15, confidence: 0.85, ... },
+      SPO2_MD: { spO2: 98, confidence: 0.90, ... },
+      SPO2_GW: { spO2: 97, confidence: 0.87, ... },
+      BP_MD: { BP_SYS: 120, BP_DIA: 80, ... },
+      BP_GW: { BP_SYS: 118, BP_DIA: 78, ... }
+    }
+  },
+  signsMsgs: {  // Automatically collected during measurement
+    1234567890123: { dataStatus: [&#39;W-RES-073&#39;], ... },
+    1234567891456: { dataStatus: [&#39;S-HRT-061&#39;], ... }
+  },
+  finalVitalsMeasurementValues: {  // Same as vitals.vitals - required for score display
+    PR_MD: { hr: 72, confidence: 0.95, ... },
+    RR_MD: { rr: 16, confidence: 0.88, ... },
+    // ...
+  },
+  prevVitals: [],           // For multi-session support
+  prevSignsMsgs: [],        // For multi-session support
+  noValidMeasurements: false,
+  webAppVersion: &#39;1.0.0&#39;,
+  frameCollectionMethod: &#39;web-sdk&#39;,
+  timestamp: 1234567890
+}
+</code></pre>
+<p><strong>Vital Tags:</strong></p>
+<ul>
+<li><code>PR_MD</code> / <code>PR_GW</code> - Pulse Rate (pulse rate)</li>
+<li><code>RR_MD</code> / <code>RR_GW</code> - Respiratory Rate</li>
+<li><code>SPO2_MD</code> / <code>SPO2_GW</code> - Blood Oxygen Saturation</li>
+<li><code>BP_MD</code> / <code>BP_GW</code> - Blood Pressure</li>
+<li><code>HRV_MD</code> / <code>HRV_GW</code> - Pulse Rate Variability</li>
+</ul>
+<p>Suffix meaning:</p>
+<ul>
+<li><code>_MD</code> - Medical-grade algorithm</li>
+<li><code>_GW</code> - General wellness algorithm</li>
+</ul>
+<h2>File Structure</h2>
+<pre><code>dist/
+├── index.js              # ESM bundle
+├── index.umd.js          # UMD bundle (browser global)
+├── worker.js             # Web worker bundle
+├── @mediapipe/       # MediaPipe WASM files
+│   └── tasks-vision/
+│       └── wasm/
+├── webvital.js       # Vital signs WASM
+├── webvital.wasm     # Vital signs WASM binary
+├── *.tflite          # TensorFlow Lite models
+└── ...
+</code></pre>
+<h2>Browser Support</h2>
+<ul>
+<li><strong>Chrome 114+</strong> (recommended)</li>
+<li><strong>Safari 16+</strong> (iOS 18+ / iPadOS 17+ / macOS Ventura or later)</li>
+<li><strong>Edge 123+</strong></li>
+<li><strong>Samsung Internet 27+</strong></li>
+</ul>
+<p><strong>Requirements:</strong></p>
+<ul>
+<li>ES Modules support</li>
+<li>Web Workers</li>
+<li>WebAssembly</li>
+<li>getUserMedia() API (camera access)</li>
+<li>OffscreenCanvas (for optimal performance)</li>
+</ul>
+<h2>Examples</h2>
+<p>See <code>/examples/vanilla-js/</code> for a complete working example with:</p>
+<ul>
+<li>Patient management</li>
+<li>Camera handling</li>
+<li>Real-time measurement</li>
+<li>Results display</li>
+<li>Server integration</li>
+</ul>
+<p>For a complete integration guide, see <a href="integration_guide.html">integration_guide.md</a>.</p>
+<h2>Development</h2>
+<pre><code class="language-bash"># Install dependencies
+npm install
+
+# Build SDK
+npm run build
+
+# Run tests
+npm test
+
+# Lint code
+npm run lint
+
+# Run example
+npm run build:start:example
+</code></pre>
+<h2>License</h2>
+<p>UNLICENSED - Private/Internal Use</p>
+<h2>Additional Resources</h2>
+<ul>
+<li><strong><a href="integration_guide.html">Integration Guide</a></strong> - Step-by-step integration instructions</li>
+<li><strong><a href="mindset_rest_apis.html">Mindset REST APIs</a></strong> - Complete backend REST API reference</li>
+<li><strong><a href="architecture.html">Architecture Documentation</a></strong> - Internal architecture and design</li>
+<li><strong><a href="./examples/">Examples</a></strong> - Working code examples</li>
+</ul>
+<h2>Support</h2>
+<p>For issues and questions, contact the Mindset Medical development team.</p>
+
+  </main>
+</body>
+</html>

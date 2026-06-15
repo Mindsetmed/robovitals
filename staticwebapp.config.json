@@ -1,0 +1,80 @@
+{
+
+  "navigationFallback": {
+
+    "rewrite": "/index.html",
+
+    "exclude": ["/assets/*", "/*.{css,js,wasm,data,tflite,png,jpg,svg,ico,map,json}"]
+
+  },
+
+  "globalHeaders": {
+
+    "Cross-Origin-Opener-Policy": "same-origin",
+
+    "Cross-Origin-Embedder-Policy": "require-corp",
+
+    "Cross-Origin-Resource-Policy": "same-origin"
+
+  },
+
+  "mimeTypes": {
+
+    ".wasm": "application/wasm",
+
+    ".data": "application/octet-stream",
+
+    ".tflite": "application/octet-stream"
+
+  },
+
+  "routes": [
+
+    {
+
+      "route": "/assets/mindset-vitals/*",
+
+      "headers": {
+
+        "Cross-Origin-Resource-Policy": "same-origin",
+
+        "Cache-Control": "public, max-age=31536000, immutable"
+
+      }
+
+    },
+
+    {
+
+      "route": "/index.html",
+
+      "headers": {
+
+        "Cross-Origin-Opener-Policy": "same-origin",
+
+        "Cross-Origin-Embedder-Policy": "require-corp",
+
+        "Cache-Control": "no-store, max-age=0"
+
+      }
+
+    },
+
+    {
+
+      "route": "/*",
+
+      "headers": {
+
+        "Cross-Origin-Opener-Policy": "same-origin",
+
+        "Cross-Origin-Embedder-Policy": "require-corp"
+
+      }
+
+    }
+
+  ]
+
+}
+
