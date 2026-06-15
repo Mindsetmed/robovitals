@@ -753,10 +753,39 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     }
 
     try {
+      // A previous scan ends via stopCameraPreview(), which stops every track
+      // and clears video.srcObject. The in-page "Start Scan" / "Try Again"
+      // path (returnToReadyScan -> startScan) does NOT re-open the camera, so
+      // on a second attempt we'd measure a dead feed. Re-acquire here if the
+      // stream is gone or its tracks are no longer live before measuring.
+      await this.ensureLiveCameraStream();
       await this.runMeasurement();
     } catch (error) {
       console.error('Vitals scan failed:', error);
       this.returnToReadyScan(this.resolveErrorMessage(error));
+    }
+  }
+
+  /**
+   * Guarantee a live camera feed before a measurement starts.
+   *
+   * `startCamera()` already handles acquisition (warmed stream or a fresh
+   * getUserMedia) and wiring it to the video element, so we just re-run it
+   * when the current stream is missing or stopped, then restart SDK preview
+   * so the worker is reading the freshly attached feed.
+   */
+  private async ensureLiveCameraStream(): Promise<void> {
+    const hasLiveTrack = !!this.mediaStream
+      ?.getVideoTracks()
+      .some((track) => track.readyState === 'live');
+    if (hasLiveTrack) {
+      return;
+    }
+
+    await this.startCamera();
+    const video = this.videoEl?.nativeElement;
+    if (video) {
+      await this.mindsetSdkRuntime.startPreview(video);
     }
   }
 
@@ -980,6 +1009,14 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.isSubmitting = true;
     this.cdr.markForCheck();
 
+    // Stamp the Vital Core (WASM) version into the SDK payload. The SDK does
+    // not include it in the `stop` result, so we add it here the way the
+    // Mindset sdk-demo does, keeping it alongside the vitals in `pro_data.data`.
+    const sdkVitalsPayload = {
+      ...mapped.sdkVitalsPayload,
+      vitalCoreVersion: this.mindsetSdkRuntime.getVitalCoreVersion() ?? undefined,
+    };
+
     this.mindsetVitalsService
       .captureVitals(this.patientId, {
         pulseRate: mapped.pulseRate,
@@ -987,9 +1024,10 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
         bloodPressureSystolic: mapped.bloodPressureSystolic,
         bloodPressureDiastolic: mapped.bloodPressureDiastolic,
         oxygenSaturation: mapped.oxygenSaturation,
-        rawSdkResponse: mapped.rawSdkResponse,
-        vitals: mapped.sdkVitalsPayload,
-        sdkVitalsPayload: mapped.sdkVitalsPayload,
+        // Send the SDK payload once. It previously went out three times
+        // (rawSdkResponse as a string, plus `vitals` and `sdkVitalsPayload`
+        // both holding the same object), which tripled the request body.
+        sdkVitalsPayload,
       })
       .subscribe({
         next: () => {

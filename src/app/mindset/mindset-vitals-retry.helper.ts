@@ -63,12 +63,19 @@ export interface MindsetMeasureWithRetriesOptions {
   ) => void;
 }
 
+/**
+ * The merged result is the last real SDK `stop` envelope with the
+ * cross-attempt vitals merged in. Index signature keeps any extra fields the
+ * SDK adds to its envelope (e.g. `webAppVersion`, `frameCollectionMethod`,
+ * `timestamp`) so they survive to submission rather than being dropped.
+ */
 export interface MindsetMergedSdkResult {
   vitals: { vitals: Record<string, Record<string, unknown>> };
   finalVitalsMeasurementValues: Record<string, Record<string, unknown>>;
   signsMsgs: Record<string, unknown>;
   prevSignsMsgs: Record<string, unknown>[];
   noValidMeasurements: boolean;
+  [key: string]: unknown;
 }
 
 export async function measureWithRetries(
@@ -80,6 +87,11 @@ export async function measureWithRetries(
   const maxAttempts = options.maxAttempts ?? MINDSET_VITALS_MAX_ATTEMPTS;
   const collected: Record<string, Record<string, unknown>> = {};
   const signsByAttempt: Record<string, unknown>[] = [];
+  // Keep the most recent real SDK `stop` envelope as the base for the merged
+  // result. The SDK returns a complete VITAL-TRAC structure; reusing it (rather
+  // than building a fresh object) preserves fields like `webAppVersion`,
+  // `frameCollectionMethod`, and `timestamp` for submission.
+  let lastSdkResult: Record<string, unknown> = {};
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const stillNeeded = wantedVitals.filter((tag) => !gotVitalReading(tag, collected[tag]));
@@ -90,6 +102,7 @@ export async function measureWithRetries(
     options.onAttemptStart?.(attempt, maxAttempts, stillNeeded);
 
     const result = await measureOnce(client, stillNeeded, videoEl);
+    lastSdkResult = result;
     const readings = (result['finalVitalsMeasurementValues'] ?? {}) as Record<
       string,
       Record<string, unknown>
@@ -105,7 +118,11 @@ export async function measureWithRetries(
     options.onAttemptComplete?.(attempt, collected);
   }
 
+  // Spread the last real SDK envelope first, then overwrite the
+  // attempt-aggregated fields. The vital readings (`collected`) span every
+  // attempt, so they replace the last attempt's partial values.
   return {
+    ...lastSdkResult,
     vitals: { vitals: collected },
     finalVitalsMeasurementValues: collected,
     signsMsgs: signsByAttempt[0] ?? {},
