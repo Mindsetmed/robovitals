@@ -9,8 +9,6 @@ export interface MindsetVitalsCaptureRequest {
   bloodPressureSystolic?: number;
   bloodPressureDiastolic?: number;
   oxygenSaturation?: number;
-  rawSdkResponse?: string;
-  vitals?: unknown;
   sdkVitalsPayload?: unknown;
 }
 

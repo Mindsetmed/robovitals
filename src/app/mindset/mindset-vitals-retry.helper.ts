@@ -39,15 +39,25 @@ export function measureOnce(
   client: MindsetVitalMeasureClient,
   vitals: string[],
   videoEl: HTMLVideoElement,
+  isActiveAttempt: () => boolean,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const onStop = (result: unknown): void => {
+      if (!isActiveAttempt()) {
+        return;
+      }
+
       client.off('stop', onStop);
       resolve((result ?? {}) as Record<string, unknown>);
     };
 
     client.on('stop', onStop);
     void client.start(vitals, videoEl).catch((error: unknown) => {
+      if (!isActiveAttempt()) {
+        client.off('stop', onStop);
+        return;
+      }
+
       client.off('stop', onStop);
       reject(error);
     });
@@ -63,12 +73,50 @@ export interface MindsetMeasureWithRetriesOptions {
   ) => void;
 }
 
-export interface MindsetMergedSdkResult {
-  vitals: { vitals: Record<string, Record<string, unknown>> };
-  finalVitalsMeasurementValues: Record<string, Record<string, unknown>>;
-  signsMsgs: Record<string, unknown>;
-  prevSignsMsgs: Record<string, unknown>[];
-  noValidMeasurements: boolean;
+function buildSignsFromAttempts(
+  signsByAttempt: Record<string, unknown>[],
+): { signsMsgs: Record<string, unknown>; prevSignsMsgs: Record<string, unknown>[] } {
+  if (signsByAttempt.length === 0) {
+    return { signsMsgs: {}, prevSignsMsgs: [] };
+  }
+
+  const signsMsgs = signsByAttempt[signsByAttempt.length - 1] ?? {};
+  const prevSignsMsgs = signsByAttempt.slice(0, -1).reverse();
+
+  return { signsMsgs, prevSignsMsgs };
+}
+
+function mergeCollectedIntoStopEnvelope(
+  lastStopEnvelope: Record<string, unknown> | null,
+  collected: Record<string, Record<string, unknown>>,
+  signsByAttempt: Record<string, unknown>[],
+): Record<string, unknown> {
+  const hasCollected = Object.keys(collected).length > 0;
+  const { signsMsgs, prevSignsMsgs } = buildSignsFromAttempts(signsByAttempt);
+
+  if (!lastStopEnvelope) {
+    return {
+      vitals: { vitals: collected },
+      finalVitalsMeasurementValues: collected,
+      signsMsgs,
+      prevSignsMsgs,
+      noValidMeasurements: !hasCollected,
+    };
+  }
+
+  const merged: Record<string, unknown> = { ...lastStopEnvelope };
+  const existingVitalsWrapper =
+    merged['vitals'] && typeof merged['vitals'] === 'object'
+      ? (merged['vitals'] as Record<string, unknown>)
+      : {};
+
+  merged['vitals'] = { ...existingVitalsWrapper, vitals: collected };
+  merged['finalVitalsMeasurementValues'] = collected;
+  merged['signsMsgs'] = signsMsgs;
+  merged['prevSignsMsgs'] = prevSignsMsgs;
+  merged['noValidMeasurements'] = !hasCollected;
+
+  return merged;
 }
 
 export async function measureWithRetries(
@@ -76,10 +124,12 @@ export async function measureWithRetries(
   videoEl: HTMLVideoElement,
   wantedVitals: string[],
   options: MindsetMeasureWithRetriesOptions = {},
-): Promise<MindsetMergedSdkResult> {
+): Promise<Record<string, unknown>> {
   const maxAttempts = options.maxAttempts ?? MINDSET_VITALS_MAX_ATTEMPTS;
   const collected: Record<string, Record<string, unknown>> = {};
   const signsByAttempt: Record<string, unknown>[] = [];
+  let lastStopEnvelope: Record<string, unknown> | null = null;
+  let activeAttempt = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const stillNeeded = wantedVitals.filter((tag) => !gotVitalReading(tag, collected[tag]));
@@ -87,9 +137,16 @@ export async function measureWithRetries(
       break;
     }
 
+    activeAttempt = attempt;
     options.onAttemptStart?.(attempt, maxAttempts, stillNeeded);
 
-    const result = await measureOnce(client, stillNeeded, videoEl);
+    const result = await measureOnce(
+      client,
+      stillNeeded,
+      videoEl,
+      () => activeAttempt === attempt,
+    );
+    lastStopEnvelope = result;
     const readings = (result['finalVitalsMeasurementValues'] ?? {}) as Record<
       string,
       Record<string, unknown>
@@ -101,15 +158,9 @@ export async function measureWithRetries(
       }
     });
 
-    signsByAttempt.unshift((result['signsMsgs'] ?? {}) as Record<string, unknown>);
+    signsByAttempt.push((result['signsMsgs'] ?? {}) as Record<string, unknown>);
     options.onAttemptComplete?.(attempt, collected);
   }
 
-  return {
-    vitals: { vitals: collected },
-    finalVitalsMeasurementValues: collected,
-    signsMsgs: signsByAttempt[0] ?? {},
-    prevSignsMsgs: signsByAttempt.slice(1),
-    noValidMeasurements: Object.keys(collected).length === 0,
-  };
+  return mergeCollectedIntoStopEnvelope(lastStopEnvelope, collected, signsByAttempt);
 }

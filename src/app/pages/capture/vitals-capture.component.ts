@@ -471,8 +471,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     try {
       this.cdr.detectChanges();
       await this.waitForVideoElement();
-      await this.startCamera();
-      await this.attachSharedSdk();
+      await this.ensureCameraReadyForMeasurement();
       this.scanState = 'ready_to_scan';
       this.refreshFaceGuideOverlay();
       this.cdr.markForCheck();
@@ -689,6 +688,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
           data?.percentComplete,
         );
         if (
+          !this.measurementBatchActive &&
           this.scanState === 'scanning_in_progress' &&
           (this.scanSecondsRemaining <= 0 || this.progressPercent >= 100)
         ) {
@@ -765,6 +765,8 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
       throw new Error('Vitals client not initialized.');
     }
 
+    await this.ensureCameraReadyForMeasurement();
+
     const video = this.videoEl?.nativeElement;
     if (!video) {
       throw new Error('Video element not available.');
@@ -809,14 +811,16 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
           this.progressPercent = 0;
           this.scanSecondsRemaining = this.maxSessionTime;
           this.scanFinalizing = false;
+          this.handlingMeasurementStop = false;
           this.clearScanTimers();
           this.mindsetSdkRuntime.markMeasurementStarted();
           console.info(`Vitals attempt ${attempt}/${maxAttempts}: measuring`, vitals);
           this.cdr.markForCheck();
         },
         onAttemptComplete: () => {
-          this.mindsetSdkRuntime.resetMeasurementState();
+          this.scanFinalizing = false;
           this.clearScanTimers();
+          this.mindsetSdkRuntime.resetMeasurementState();
         },
       });
 
@@ -844,7 +848,12 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private scheduleFinalizeAtCompletion(): void {
-    if (this.scanFinalizeTimer || this.scanFinalizing || this.scanState !== 'scanning_in_progress') {
+    if (
+      this.measurementBatchActive ||
+      this.scanFinalizeTimer ||
+      this.scanFinalizing ||
+      this.scanState !== 'scanning_in_progress'
+    ) {
       return;
     }
 
@@ -855,7 +864,12 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private async finalizeActiveScan(): Promise<void> {
-    if (this.scanFinalizing || !this.vitalClient || this.scanState !== 'scanning_in_progress') {
+    if (
+      this.measurementBatchActive ||
+      this.scanFinalizing ||
+      !this.vitalClient ||
+      this.scanState !== 'scanning_in_progress'
+    ) {
       return;
     }
 
@@ -868,10 +882,6 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
 
     try {
       const stopPayload = await this.mindsetSdkRuntime.stopMeasurement();
-      if (this.measurementBatchActive) {
-        return;
-      }
-
       if (stopPayload) {
         await this.handleMeasurementStop(stopPayload);
       }
@@ -969,7 +979,8 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private async handleScanComplete(sdkResult: unknown): Promise<void> {
-    const mapped = mapSdkStopResultToCaptureRequest(sdkResult);
+    const vitalCoreVersion = this.mindsetSdkRuntime.getVitalCoreVersion();
+    const mapped = mapSdkStopResultToCaptureRequest(sdkResult, vitalCoreVersion);
     this.resultRows = buildVitalResultRowsAll(mapped);
 
     if (!mapped.isValid) {
@@ -987,8 +998,6 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
         bloodPressureSystolic: mapped.bloodPressureSystolic,
         bloodPressureDiastolic: mapped.bloodPressureDiastolic,
         oxygenSaturation: mapped.oxygenSaturation,
-        rawSdkResponse: mapped.rawSdkResponse,
-        vitals: mapped.sdkVitalsPayload,
         sdkVitalsPayload: mapped.sdkVitalsPayload,
       })
       .subscribe({
@@ -1291,6 +1300,32 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     }
 
     this.cdr.markForCheck();
+  }
+
+  private isCameraStreamActive(): boolean {
+    const track = this.mediaStream?.getVideoTracks()[0];
+    return !!track && track.readyState === 'live';
+  }
+
+  private async ensureCameraReadyForMeasurement(): Promise<void> {
+    await this.waitForVideoElement();
+
+    const video = this.videoEl?.nativeElement;
+    if (!video) {
+      throw new Error('Video element not available.');
+    }
+
+    if (!this.isCameraStreamActive() || !video.srcObject) {
+      await this.startCamera();
+    }
+
+    if (!this.vitalClient) {
+      await this.attachSharedSdk();
+      return;
+    }
+
+    await this.mindsetSdkRuntime.startPreview(video);
+    this.refreshFaceGuideOverlay();
   }
 
   private async cleanup(): Promise<void> {

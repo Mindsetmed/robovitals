@@ -12,7 +12,6 @@ export interface MappedVitalsCaptureResult {
   bloodPressureSystolic?: number;
   bloodPressureDiastolic?: number;
   oxygenSaturation?: number;
-  rawSdkResponse: string;
   sdkVitalsPayload: Record<string, unknown>;
   isValid: boolean;
   validationMessage?: string;
@@ -20,6 +19,20 @@ export interface MappedVitalsCaptureResult {
 
 export function buildSdkVitalsSubmissionPayload(sdkResult: unknown): Record<string, unknown> {
   return { ...((sdkResult ?? {}) as Record<string, unknown>) };
+}
+
+export function prepareSdkVitalsSubmissionPayload(
+  sdkResult: unknown,
+  vitalCoreVersion?: string | null,
+): Record<string, unknown> {
+  const payload = buildSdkVitalsSubmissionPayload(sdkResult);
+  const version = vitalCoreVersion?.trim();
+
+  if (version && payload['vitalCoreVersion'] == null) {
+    payload['vitalCoreVersion'] = version;
+  }
+
+  return payload;
 }
 
 function readNumber(value: unknown): number | undefined {
@@ -38,19 +51,6 @@ function mapBloodPressure(bp: Record<string, unknown> | undefined): { systolic?:
   const systolic = readNumber(bp['BP_SYS'] ?? bp['sbp_mmHg']);
   const diastolic = readNumber(bp['BP_DIA'] ?? bp['dbp_mmHg']);
   return { systolic, diastolic };
-}
-
-function safeJsonStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch (error) {
-    if (error instanceof RangeError) {
-      return JSON.stringify({
-        error: 'SDK payload too large to serialize',
-      });
-    }
-    throw error;
-  }
 }
 
 function isEmptyRecord(value: unknown): boolean {
@@ -82,14 +82,15 @@ function sdkResultHasMeasurements(result: Record<string, unknown>): boolean {
   return Object.keys(extractSdkVitalsMap(result)).length > 0;
 }
 
-export function mapSdkStopResultToCaptureRequest(sdkResult: unknown): MappedVitalsCaptureResult {
+export function mapSdkStopResultToCaptureRequest(
+  sdkResult: unknown,
+  vitalCoreVersion?: string | null,
+): MappedVitalsCaptureResult {
   const result = (sdkResult ?? {}) as Record<string, unknown>;
-  const sdkVitalsPayload = buildSdkVitalsSubmissionPayload(sdkResult);
-  const rawSdkResponse = safeJsonStringify(sdkVitalsPayload);
+  const sdkVitalsPayload = prepareSdkVitalsSubmissionPayload(sdkResult, vitalCoreVersion);
 
   if (!sdkResultHasMeasurements(result)) {
     return {
-      rawSdkResponse,
       sdkVitalsPayload,
       isValid: false,
       validationMessage:
@@ -111,7 +112,6 @@ export function mapSdkStopResultToCaptureRequest(sdkResult: unknown): MappedVita
     bloodPressureSystolic: bpValues.systolic,
     bloodPressureDiastolic: bpValues.diastolic,
     oxygenSaturation: readNumber(spo2?.['spO2']),
-    rawSdkResponse,
     sdkVitalsPayload,
     isValid: false,
   };
