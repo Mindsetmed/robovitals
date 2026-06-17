@@ -39,25 +39,29 @@ export function measureOnce(
   client: MindsetVitalMeasureClient,
   vitals: string[],
   videoEl: HTMLVideoElement,
-  isActiveAttempt: () => boolean,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
+    // Settle once. Attempts run one at a time, so the only stray 'stop' events
+    // are duplicates/late ones from the SDK; ignore them and always detach the
+    // listener. The old isActiveAttempt guard could return without settling,
+    // which hung the loop.
+    let settled = false;
+
     const onStop = (result: unknown): void => {
-      if (!isActiveAttempt()) {
+      if (settled) {
         return;
       }
-
+      settled = true;
       client.off('stop', onStop);
       resolve((result ?? {}) as Record<string, unknown>);
     };
 
     client.on('stop', onStop);
     void client.start(vitals, videoEl).catch((error: unknown) => {
-      if (!isActiveAttempt()) {
-        client.off('stop', onStop);
+      if (settled) {
         return;
       }
-
+      settled = true;
       client.off('stop', onStop);
       reject(error);
     });
@@ -73,6 +77,10 @@ export interface MindsetMeasureWithRetriesOptions {
   ) => void;
 }
 
+function isEmptySigns(signs: Record<string, unknown> | undefined): boolean {
+  return !signs || Object.keys(signs).length === 0;
+}
+
 function buildSignsFromAttempts(
   signsByAttempt: Record<string, unknown>[],
 ): { signsMsgs: Record<string, unknown>; prevSignsMsgs: Record<string, unknown>[] } {
@@ -80,8 +88,23 @@ function buildSignsFromAttempts(
     return { signsMsgs: {}, prevSignsMsgs: [] };
   }
 
-  const signsMsgs = signsByAttempt[signsByAttempt.length - 1] ?? {};
-  const prevSignsMsgs = signsByAttempt.slice(0, -1).reverse();
+  // signsByAttempt is oldest-first. signsMsgs holds the latest attempt's signs,
+  // prevSignsMsgs the rest newest-first (the vital-trac-app convention).
+  // A late attempt re-measures only the missing vitals and can finish with no
+  // signs logged, so use the latest NON-EMPTY attempt for signsMsgs instead of
+  // the very last one. Empty attempts stay in prevSignsMsgs, not dropped.
+  let primaryIndex = signsByAttempt.length - 1;
+  for (let i = signsByAttempt.length - 1; i >= 0; i -= 1) {
+    if (!isEmptySigns(signsByAttempt[i])) {
+      primaryIndex = i;
+      break;
+    }
+  }
+
+  const signsMsgs = signsByAttempt[primaryIndex] ?? {};
+  const prevSignsMsgs = signsByAttempt
+    .filter((_, i) => i !== primaryIndex)
+    .reverse();
 
   return { signsMsgs, prevSignsMsgs };
 }
@@ -129,7 +152,6 @@ export async function measureWithRetries(
   const collected: Record<string, Record<string, unknown>> = {};
   const signsByAttempt: Record<string, unknown>[] = [];
   let lastStopEnvelope: Record<string, unknown> | null = null;
-  let activeAttempt = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const stillNeeded = wantedVitals.filter((tag) => !gotVitalReading(tag, collected[tag]));
@@ -137,15 +159,9 @@ export async function measureWithRetries(
       break;
     }
 
-    activeAttempt = attempt;
     options.onAttemptStart?.(attempt, maxAttempts, stillNeeded);
 
-    const result = await measureOnce(
-      client,
-      stillNeeded,
-      videoEl,
-      () => activeAttempt === attempt,
-    );
+    const result = await measureOnce(client, stillNeeded, videoEl);
     lastStopEnvelope = result;
     const readings = (result['finalVitalsMeasurementValues'] ?? {}) as Record<
       string,
