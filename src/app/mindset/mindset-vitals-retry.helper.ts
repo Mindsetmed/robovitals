@@ -2,8 +2,19 @@ export const MINDSET_VITALS_MAX_ATTEMPTS = 3;
 
 export interface MindsetVitalMeasureClient {
   start(vitals: string[], videoEl: HTMLVideoElement): Promise<unknown>;
+  stop?(): Promise<unknown>;
   on(event: 'stop', handler: (result: unknown) => void): void;
   off(event: 'stop', handler: (result: unknown) => void): void;
+}
+
+export interface MindsetMeasureOnceOptions {
+  attemptNumber?: number;
+  attemptTimeoutMs?: number;
+  onMeasureStarted?: () => void;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function readPositiveNumber(value: unknown): number | undefined {
@@ -39,38 +50,123 @@ export function measureOnce(
   client: MindsetVitalMeasureClient,
   vitals: string[],
   videoEl: HTMLVideoElement,
-  isActiveAttempt: () => boolean,
+  options: MindsetMeasureOnceOptions = {},
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const onStop = (result: unknown): void => {
-      if (!isActiveAttempt()) {
+    const attemptNumber = options.attemptNumber ?? 0;
+    let settled = false;
+    let measurementStarted = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (action: () => void): void => {
+      console.log('[Vitals Retry] Finish called', {
+        attemptNumber,
+        settledBefore: settled,
+      });
+
+      if (settled) {
         return;
       }
 
+      settled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       client.off('stop', onStop);
-      resolve((result ?? {}) as Record<string, unknown>);
+      action();
+    };
+
+    const onStop = (result: unknown): void => {
+      console.log('[Vitals Retry] Stop event received', {
+        attemptNumber,
+        settled,
+        result,
+      });
+
+      if (!measurementStarted) {
+        return;
+      }
+
+      if (settled) {
+        console.log('[Vitals Retry] Ignoring duplicate stop event', {
+          attemptNumber,
+        });
+        return;
+      }
+
+      finish(() => {
+        console.log('[Vitals Retry] Promise settled', {
+          attemptNumber,
+          outcome: 'resolved',
+        });
+        resolve((result ?? {}) as Record<string, unknown>);
+      });
     };
 
     client.on('stop', onStop);
-    void client.start(vitals, videoEl).catch((error: unknown) => {
-      if (!isActiveAttempt()) {
-        client.off('stop', onStop);
-        return;
-      }
 
-      client.off('stop', onStop);
-      reject(error);
-    });
+    const attemptTimeoutMs = options.attemptTimeoutMs;
+    if (attemptTimeoutMs && attemptTimeoutMs > 0 && client.stop) {
+      timeoutId = setTimeout(() => {
+        if (!measurementStarted || settled) {
+          return;
+        }
+
+        void client.stop!()
+          .then((result) => {
+            finish(() => {
+              console.log('[Vitals Retry] Promise settled', {
+                attemptNumber,
+                outcome: 'resolved',
+              });
+              resolve((result ?? {}) as Record<string, unknown>);
+            });
+          })
+          .catch((error: unknown) => {
+            finish(() => {
+              console.log('[Vitals Retry] Promise settled', {
+                attemptNumber,
+                outcome: 'rejected',
+              });
+              reject(error);
+            });
+          });
+      }, attemptTimeoutMs);
+    }
+
+    void client
+      .start(vitals, videoEl)
+      .then(() => {
+        measurementStarted = true;
+        console.log('[Vitals Retry] Attempt started', attemptNumber);
+        options.onMeasureStarted?.();
+      })
+      .catch((error: unknown) => {
+        finish(() => {
+          console.log('[Vitals Retry] Promise settled', {
+            attemptNumber,
+            outcome: 'rejected',
+          });
+          reject(error);
+        });
+      });
   });
 }
 
 export interface MindsetMeasureWithRetriesOptions {
   maxAttempts?: number;
-  onAttemptStart?: (attempt: number, maxAttempts: number, vitals: string[]) => void;
+  attemptTimeoutMs?: number;
+  delayBetweenAttemptsMs?: number;
+  onAttemptStarted?: (attempt: number, maxAttempts: number, vitals: string[]) => void;
   onAttemptComplete?: (
     attempt: number,
     collected: Record<string, Record<string, unknown>>,
   ) => void;
+}
+
+function isNonEmptySigns(signs: Record<string, unknown>): boolean {
+  return Object.keys(signs).length > 0;
 }
 
 function buildSignsFromAttempts(
@@ -80,8 +176,37 @@ function buildSignsFromAttempts(
     return { signsMsgs: {}, prevSignsMsgs: [] };
   }
 
-  const signsMsgs = signsByAttempt[signsByAttempt.length - 1] ?? {};
-  const prevSignsMsgs = signsByAttempt.slice(0, -1).reverse();
+  let signsMsgsIndex = -1;
+  for (let i = signsByAttempt.length - 1; i >= 0; i--) {
+    if (isNonEmptySigns(signsByAttempt[i])) {
+      signsMsgsIndex = i;
+      break;
+    }
+  }
+
+  const signsMsgs = signsMsgsIndex >= 0 ? signsByAttempt[signsMsgsIndex] : {};
+  const prevSignsMsgs: Record<string, unknown>[] = [];
+
+  for (let i = signsByAttempt.length - 1; i >= 0; i--) {
+    if (i === signsMsgsIndex) {
+      continue;
+    }
+
+    prevSignsMsgs.push(signsByAttempt[i]);
+  }
+
+  console.log(
+    '[Vitals Retry] Attempts summary',
+    signsByAttempt.map((signsMsgs, index) => ({
+      attempt: index + 1,
+      signsMsgs,
+    })),
+  );
+
+  console.log('[Vitals Retry] Final signs selection', {
+    selectedSignsMsgs: signsMsgs,
+    previousSignsMsgs: prevSignsMsgs,
+  });
 
   return { signsMsgs, prevSignsMsgs };
 }
@@ -126,6 +251,7 @@ export async function measureWithRetries(
   options: MindsetMeasureWithRetriesOptions = {},
 ): Promise<Record<string, unknown>> {
   const maxAttempts = options.maxAttempts ?? MINDSET_VITALS_MAX_ATTEMPTS;
+  const delayBetweenAttemptsMs = options.delayBetweenAttemptsMs ?? 400;
   const collected: Record<string, Record<string, unknown>> = {};
   const signsByAttempt: Record<string, unknown>[] = [];
   let lastStopEnvelope: Record<string, unknown> | null = null;
@@ -138,14 +264,25 @@ export async function measureWithRetries(
     }
 
     activeAttempt = attempt;
-    options.onAttemptStart?.(attempt, maxAttempts, stillNeeded);
 
-    const result = await measureOnce(
-      client,
-      stillNeeded,
-      videoEl,
-      () => activeAttempt === attempt,
-    );
+    if (attempt > 1) {
+      await sleep(delayBetweenAttemptsMs);
+      if (activeAttempt !== attempt) {
+        break;
+      }
+    }
+
+    const result = await measureOnce(client, stillNeeded, videoEl, {
+      attemptNumber: attempt,
+      attemptTimeoutMs: options.attemptTimeoutMs,
+      onMeasureStarted: () => {
+        if (activeAttempt !== attempt) {
+          return;
+        }
+
+        options.onAttemptStarted?.(attempt, maxAttempts, stillNeeded);
+      },
+    });
     lastStopEnvelope = result;
     const readings = (result['finalVitalsMeasurementValues'] ?? {}) as Record<
       string,

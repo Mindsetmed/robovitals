@@ -9,24 +9,39 @@ export interface VitalsCaptureSession {
 
 @Injectable({ providedIn: 'root' })
 export class CaptureSessionService {
-  private session: VitalsCaptureSession | null = null;
+  private activeSession: VitalsCaptureSession | null = null;
+  private persistedHomeSession: VitalsCaptureSession | null = null;
 
   setSession(session: VitalsCaptureSession): void {
-    this.session = session;
+    this.activeSession = session;
+    this.persistedHomeSession = session;
   }
 
   hasActiveSession(): boolean {
-    return !!this.session?.patientId;
+    return !!this.activeSession?.patientId;
   }
 
   getSession(): VitalsCaptureSession {
-    if (!this.session?.patientId) {
+    if (!this.activeSession?.patientId) {
       throw new Error('No active vitals capture session.');
     }
-    return this.session;
+    return this.activeSession;
+  }
+
+  getPersistedHomeSession(): VitalsCaptureSession | null {
+    return this.persistedHomeSession;
+  }
+
+  clearActiveSession(): void {
+    this.activeSession = null;
   }
 
   clearSession(): void {
-    this.session = null;
+    this.clearActiveSession();
+  }
+
+  clearAll(): void {
+    this.activeSession = null;
+    this.persistedHomeSession = null;
   }
 }

@@ -51,6 +51,7 @@ export class MindsetVitalsSdkRuntimeService {
   private currentPatientId = '';
   private previewActive = false;
   private measuringActive = false;
+  private captureEpoch = 0;
   private warmedCameraStream: MediaStream | null = null;
   private readonly eventBindings = new Map<string, (...args: unknown[]) => void>();
   private readonly preloadAssetProgress = new Map<string, { loaded: number; total: number }>();
@@ -178,6 +179,11 @@ export class MindsetVitalsSdkRuntimeService {
     this.currentPatientId = (patientId || '').trim();
   }
 
+  startCaptureEpoch(): number {
+    this.captureEpoch += 1;
+    return this.captureEpoch;
+  }
+
   async ensureReady(): Promise<MindsetVitalClient> {
     await this.beginClientInit();
     if (!this.vitalClient) {
@@ -293,7 +299,11 @@ export class MindsetVitalsSdkRuntimeService {
     return this.vitalClient;
   }
 
-  async releaseAfterCapture(): Promise<void> {
+  async releaseAfterCapture(captureEpoch: number): Promise<void> {
+    if (captureEpoch !== this.captureEpoch) {
+      return;
+    }
+
     await this.endCaptureSession();
 
     if (this.vitalClient) {

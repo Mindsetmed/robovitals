@@ -78,6 +78,7 @@ export class HomeComponent implements OnInit, OnDestroy {
       }
     }
     this.initPatientIdLookup();
+    this.restorePersistedHomeSession();
     this.form.controls.patientId.valueChanges.pipe(takeUntil(this.destroy$)).subscribe(() => {
       this.onPatientIdChanged();
     });
@@ -230,7 +231,7 @@ export class HomeComponent implements OnInit, OnDestroy {
       .warmUp()
       .then(() => this.router.navigate(['/capture']))
       .catch(() => {
-        this.captureSession.clearSession();
+        this.captureSession.clearActiveSession();
         this.setAlert('danger', 'Failed to prepare vitals scanner. Please wait for models to finish loading and retry.');
       })
       .finally(() => {
@@ -381,6 +382,35 @@ export class HomeComponent implements OnInit, OnDestroy {
   private setAlert(type: 'info' | 'warning' | 'success' | 'danger', message: string): void {
     this.alertType = type;
     this.alertMessage = message;
+  }
+
+  private restorePersistedHomeSession(): void {
+    const persisted = this.captureSession.getPersistedHomeSession();
+    if (!persisted?.patientId) {
+      return;
+    }
+
+    const registration = persisted.registration;
+    this.form.patchValue(
+      {
+        patientId: persisted.patientId,
+        email: registration?.email ?? '',
+        firstName: registration?.firstName ?? '',
+        lastName: registration?.lastName ?? '',
+        birthDate: registration?.birthDate ?? '',
+        heightCm: registration?.heightCm ?? null,
+        weightKg: registration?.weightKg ?? null,
+        temperature: registration?.temperature ?? null,
+      },
+      { emitEvent: false },
+    );
+
+    this.lastLookedUpPatientId = persisted.patientId;
+    this.patientFoundInMindset = persisted.mindsetPatientAlreadyRegistered;
+
+    if (this.patientFoundInMindset) {
+      this.setAlert('success', 'Patient found. You can capture vitals.');
+    }
   }
 
 }

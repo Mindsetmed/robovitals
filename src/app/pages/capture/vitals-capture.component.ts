@@ -79,7 +79,8 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   public statusMessage = '';
   public progressPercent = 0;
   public scanSecondsRemaining = 0;
-  private maxSessionTime = 60;
+  private static readonly DISPLAY_SESSION_SECONDS = 60;
+  private maxSessionTime = VitalsCaptureComponent.DISPLAY_SESSION_SECONDS;
   public showScanWarning = false;
   public isSubmitting = false;
   public faceGuideStyle: Record<string, string> | null = null;
@@ -94,15 +95,22 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   private videoResizeObserver: ResizeObserver | null = null;
   private mediaStream: MediaStream | null = null;
   private authorizedVitals: string[] = [];
+  private pendingAuthorizedVitalsListener: ((vitals: string[]) => void) | null = null;
   private destroyPending = false;
   private qualityWarningTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private handlingMeasurementStop = false;
   private scanFinalizing = false;
   private scanFinalizeTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchAttemptStopTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchAttemptStopping = false;
   private measurementBatchActive = false;
+  private batchAttemptMeasuring = false;
+  private measurementInFlight = false;
+  private activeMeasurementRunId = 0;
   private currentMeasureAttempt = 0;
   private maxMeasureAttempts = MINDSET_VITALS_MAX_ATTEMPTS;
+  private captureEpoch = 0;
 
   private readonly successMessage = 'Vitals submitted successfully';
   private readonly failureMessage = 'Vitals capture failed';
@@ -132,6 +140,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.patientRegistration = session.registration;
     this.mindsetPatientAlreadyRegistered = session.mindsetPatientAlreadyRegistered;
     this.mindsetSdkRuntime.setPatientId(this.patientId);
+    this.captureEpoch = this.mindsetSdkRuntime.startCaptureEpoch();
   }
 
   ngAfterViewInit(): void {
@@ -189,10 +198,8 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   onBackClick = (): void => {
-    void this.cleanup().then(() => {
-      this.captureSession.clearSession();
-      void this.router.navigate(['/']);
-    });
+    this.captureSession.clearActiveSession();
+    void this.router.navigate(['/']);
   };
 
   onDoneClick = (): void => {
@@ -265,11 +272,11 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     if (this.scanState !== 'scanning_in_progress' || this.showSideWarning) {
       return null;
     }
-    if (this.measurementBatchActive && this.currentMeasureAttempt > 1) {
-      return `Attempt ${this.currentMeasureAttempt} of ${this.maxMeasureAttempts}. Hold still while we measure.`;
-    }
-    if (this.scanFinalizing || this.progressPercent >= 100 || this.scanSecondsRemaining <= 0) {
+    if (this.isMeasurementCompleting) {
       return 'Please wait while we finish.';
+    }
+    if (this.measurementBatchActive && this.currentMeasureAttempt >= 1) {
+      return `Attempt ${this.currentMeasureAttempt} of ${this.maxMeasureAttempts}. Hold still while we measure.`;
     }
     return this.coachingTip;
   }
@@ -287,10 +294,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   public get showScanCompleteCardAnimation(): boolean {
-    return (
-      this.scanState === 'scanning_in_progress' &&
-      (this.scanFinalizing || this.progressPercent >= 100 || this.scanSecondsRemaining <= 0)
-    );
+    return this.scanState === 'scanning_in_progress' && this.isMeasurementCompleting;
   }
 
   public showCardCompleteDots(card: VitalCaptureCard): boolean {
@@ -392,9 +396,8 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   public get showScanLineAnimation(): boolean {
     return (
       this.scanState === 'scanning_in_progress' &&
-      !this.scanFinalizing &&
-      this.scanSecondsRemaining > 0 &&
-      this.progressPercent < 100
+      this.batchAttemptMeasuring &&
+      !this.isMeasurementCompleting
     );
   }
 
@@ -442,6 +445,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.showScanWarning = false;
     this.handlingMeasurementStop = false;
     this.measurementBatchActive = false;
+    this.batchAttemptMeasuring = false;
     this.currentMeasureAttempt = 0;
     this.mindsetSdkRuntime.resetMeasurementState();
     this.refreshFaceGuideOverlay();
@@ -453,7 +457,6 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
 
-    this.scanState = 'initializing_scan';
     this.resultRows = [];
     this.isSubmitting = false;
     this.statusMessage = '';
@@ -463,19 +466,20 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.showScanWarning = false;
     this.handlingMeasurementStop = false;
     this.measurementBatchActive = false;
+    this.batchAttemptMeasuring = false;
     this.currentMeasureAttempt = 0;
     this.clearQualityWarnings();
     this.clearScanTimers();
     this.mindsetSdkRuntime.resetMeasurementState();
 
     try {
+      this.scanState = 'initializing_scan';
       this.cdr.detectChanges();
       await this.waitForVideoElement();
       await this.ensureCameraReadyForMeasurement();
       this.scanState = 'ready_to_scan';
       this.refreshFaceGuideOverlay();
       this.cdr.markForCheck();
-      await this.runMeasurement();
     } catch (error) {
       console.error('Vitals retry failed:', error);
       this.setFailedState(this.resolveErrorMessage(error), false, true);
@@ -483,16 +487,15 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private finishAndRestartSession(): void {
-    void this.cleanup().finally(() => {
-      this.captureSession.clearSession();
-      window.location.assign('/');
-    });
+    this.captureSession.clearActiveSession();
+    void this.router.navigate(['/']);
   }
 
   private resetState(): void {
     this.scanFinalizing = false;
     this.handlingMeasurementStop = false;
     this.measurementBatchActive = false;
+    this.batchAttemptMeasuring = false;
     this.currentMeasureAttempt = 0;
     this.scanState = 'initializing_scan';
     this.statusMessage = '';
@@ -669,10 +672,12 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   private async attachSharedSdk(): Promise<void> {
     const video = this.videoEl.nativeElement;
     this.mindsetSdkRuntime.setPatientId(this.patientId);
-    this.vitalClient = await this.mindsetSdkRuntime.ensureReady();
+    this.vitalClient = await this.mindsetSdkRuntime.prepareForNewCapture();
+    this.authorizedVitals = [];
     this.mindsetSdkRuntime.bindSession({
       onAuthorizedVitals: (vitals) => {
         this.authorizedVitals = vitals || [];
+        this.pendingAuthorizedVitalsListener?.(this.authorizedVitals);
         this.syncCaptureCards();
       },
       onMaxSessionTime: (duration) => {
@@ -681,18 +686,35 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
         }
       },
       onTimeLeft: (data) => {
-        this.progressPercent = this.toProgressPercent(data?.percentComplete);
-        this.scanSecondsRemaining = this.toDisplayRemainingSeconds(
+        if (this.measurementBatchActive && !this.batchAttemptMeasuring) {
+          return;
+        }
+
+        if (data?.maxTime && data.maxTime > 0) {
+          this.maxSessionTime = data.maxTime;
+        }
+
+        const nextProgress = this.toProgressPercent(data?.percentComplete);
+        const nextRemaining = this.toDisplayRemainingSeconds(
           data?.timeLeft,
           data?.maxTime,
           data?.percentComplete,
         );
-        if (
-          !this.measurementBatchActive &&
-          this.scanState === 'scanning_in_progress' &&
-          (this.scanSecondsRemaining <= 0 || this.progressPercent >= 100)
-        ) {
-          this.scheduleFinalizeAtCompletion();
+
+        this.progressPercent = nextProgress;
+        this.scanSecondsRemaining = nextRemaining;
+
+        const rawTimeLeft = data?.timeLeft;
+        const measurementComplete =
+          nextProgress >= 100 ||
+          (rawTimeLeft != null && Number.isFinite(rawTimeLeft) && rawTimeLeft <= 0);
+
+        if (this.scanState === 'scanning_in_progress' && measurementComplete) {
+          if (this.measurementBatchActive) {
+            this.scheduleBatchAttemptStop();
+          } else {
+            this.scheduleFinalizeAtCompletion();
+          }
         }
         this.cdr.markForCheck();
       },
@@ -765,6 +787,34 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
       throw new Error('Vitals client not initialized.');
     }
 
+    if (this.measurementInFlight) {
+      return;
+    }
+
+    const runId = ++this.activeMeasurementRunId;
+    this.measurementInFlight = true;
+    this.currentMeasureAttempt = 0;
+    this.batchAttemptMeasuring = false;
+
+    try {
+      await this.runMeasurementBatch(runId);
+    } finally {
+      if (runId === this.activeMeasurementRunId) {
+        this.measurementInFlight = false;
+        this.measurementBatchActive = false;
+        this.currentMeasureAttempt = 0;
+        this.batchAttemptMeasuring = false;
+        this.mindsetSdkRuntime.resetMeasurementState();
+        this.clearScanTimers();
+      }
+    }
+  }
+
+  private async runMeasurementBatch(runId: number): Promise<void> {
+    if (!this.vitalClient) {
+      throw new Error('Vitals client not initialized.');
+    }
+
     await this.ensureCameraReadyForMeasurement();
 
     const video = this.videoEl?.nativeElement;
@@ -773,7 +823,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     }
 
     this.progressPercent = 0;
-    this.scanSecondsRemaining = this.maxSessionTime;
+    this.scanSecondsRemaining = 0;
     this.scanFinalizing = false;
     this.showScanWarning = false;
     this.clearScanTimers();
@@ -782,17 +832,17 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.statusMessage = '';
     this.refreshFaceGuideOverlay();
 
+    let wantedVitals: string[];
     try {
-      await this.vitalClient.authorize();
+      wantedVitals = await this.authorizeForMeasurement();
     } catch (error) {
       console.error('Vitals authorization failed:', error);
-      this.returnToReadyScan();
+      this.returnToReadyScan(this.resolveErrorMessage(error));
       return;
     }
 
     await this.mindsetSdkRuntime.captureVitalCoreVersion();
 
-    const wantedVitals = this.getSelectedVitals();
     if (wantedVitals.length === 0) {
       console.error('No vitals authorized. Check authorization.');
       this.returnToReadyScan();
@@ -800,16 +850,24 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     }
 
     this.measurementBatchActive = true;
+    this.batchAttemptMeasuring = false;
     this.maxMeasureAttempts = MINDSET_VITALS_MAX_ATTEMPTS;
 
     try {
       const mergedResult = await measureWithRetries(this.vitalClient, video, wantedVitals, {
         maxAttempts: MINDSET_VITALS_MAX_ATTEMPTS,
-        onAttemptStart: (attempt, maxAttempts, vitals) => {
+        attemptTimeoutMs: (this.maxSessionTime + 10) * 1000,
+        delayBetweenAttemptsMs: 400,
+        onAttemptStarted: (attempt, maxAttempts, vitals) => {
+          if (runId !== this.activeMeasurementRunId) {
+            return;
+          }
+
+          this.batchAttemptMeasuring = true;
           this.currentMeasureAttempt = attempt;
           this.maxMeasureAttempts = maxAttempts;
           this.progressPercent = 0;
-          this.scanSecondsRemaining = this.maxSessionTime;
+          this.scanSecondsRemaining = 0;
           this.scanFinalizing = false;
           this.handlingMeasurementStop = false;
           this.clearScanTimers();
@@ -818,21 +876,31 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
           this.cdr.markForCheck();
         },
         onAttemptComplete: () => {
+          if (runId !== this.activeMeasurementRunId) {
+            return;
+          }
+
+          this.batchAttemptMeasuring = false;
+          this.progressPercent = 0;
+          this.scanSecondsRemaining = 0;
           this.scanFinalizing = false;
           this.clearScanTimers();
           this.mindsetSdkRuntime.resetMeasurementState();
         },
       });
 
+      if (runId !== this.activeMeasurementRunId) {
+        return;
+      }
+
       await this.handleScanComplete(mergedResult);
     } catch (error) {
+      if (runId !== this.activeMeasurementRunId) {
+        return;
+      }
+
       console.error('Vitals measurement failed:', error);
       this.returnToReadyScan(this.resolveErrorMessage(error));
-    } finally {
-      this.measurementBatchActive = false;
-      this.currentMeasureAttempt = 0;
-      this.mindsetSdkRuntime.resetMeasurementState();
-      this.clearScanTimers();
     }
   }
 
@@ -840,10 +908,95 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     return [...this.authorizedVitals];
   }
 
+  private async authorizeForMeasurement(): Promise<string[]> {
+    if (!this.vitalClient) {
+      throw new Error('Vitals client not initialized.');
+    }
+
+    const fallbackVitals = [...this.authorizedVitals];
+
+    await this.vitalClient.authorize();
+
+    if (this.authorizedVitals.length > 0) {
+      return [...this.authorizedVitals];
+    }
+
+    const fromEvent = await this.waitForAuthorizedVitalsEvent(3000);
+    if (fromEvent.length > 0) {
+      return fromEvent;
+    }
+
+    if (fallbackVitals.length > 0) {
+      this.authorizedVitals = fallbackVitals;
+      return fallbackVitals;
+    }
+
+    throw new Error('No vitals authorized. Check authorization.');
+  }
+
+  private waitForAuthorizedVitalsEvent(timeoutMs: number): Promise<string[]> {
+    if (this.authorizedVitals.length > 0) {
+      return Promise.resolve([...this.authorizedVitals]);
+    }
+
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingAuthorizedVitalsListener = null;
+        resolve([]);
+      }, timeoutMs);
+
+      this.pendingAuthorizedVitalsListener = (vitals) => {
+        clearTimeout(timeoutId);
+        this.pendingAuthorizedVitalsListener = null;
+        resolve([...vitals]);
+      };
+    });
+  }
+
   private clearScanTimers(): void {
     if (this.scanFinalizeTimer) {
       clearTimeout(this.scanFinalizeTimer);
       this.scanFinalizeTimer = null;
+    }
+    if (this.batchAttemptStopTimer) {
+      clearTimeout(this.batchAttemptStopTimer);
+      this.batchAttemptStopTimer = null;
+    }
+  }
+
+  private scheduleBatchAttemptStop(): void {
+    if (
+      this.batchAttemptStopTimer ||
+      this.batchAttemptStopping ||
+      !this.measurementBatchActive ||
+      this.scanState !== 'scanning_in_progress'
+    ) {
+      return;
+    }
+
+    this.batchAttemptStopTimer = setTimeout(() => {
+      this.batchAttemptStopTimer = null;
+      void this.finalizeBatchAttempt();
+    }, 400);
+  }
+
+  private async finalizeBatchAttempt(): Promise<void> {
+    if (
+      !this.measurementBatchActive ||
+      this.batchAttemptStopping ||
+      !this.vitalClient ||
+      this.scanState !== 'scanning_in_progress'
+    ) {
+      return;
+    }
+
+    this.batchAttemptStopping = true;
+    try {
+      await this.mindsetSdkRuntime.stopMeasurement();
+    } catch (error) {
+      console.error('Batch attempt stop failed:', error);
+    } finally {
+      this.batchAttemptStopping = false;
     }
   }
 
@@ -949,6 +1102,14 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     return null;
   }
 
+  private get isMeasurementCompleting(): boolean {
+    return (
+      this.scanFinalizing ||
+      this.batchAttemptStopping ||
+      (this.batchAttemptMeasuring && this.progressPercent >= 100)
+    );
+  }
+
   private toProgressPercent(value?: number): number {
     if (value == null || !Number.isFinite(value)) {
       return 0;
@@ -962,17 +1123,18 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     maxTime?: number,
     percentComplete?: number,
   ): number {
-    if (timeLeft != null && Number.isFinite(timeLeft)) {
-      return Math.max(0, Math.ceil(timeLeft));
+    const sessionMax = maxTime && maxTime > 0 ? maxTime : this.maxSessionTime;
+    const displayMax = VitalsCaptureComponent.DISPLAY_SESSION_SECONDS;
+
+    if (timeLeft != null && Number.isFinite(timeLeft) && sessionMax > 0) {
+      const ratio = Math.max(0, Math.min(1, timeLeft / sessionMax));
+      return Math.max(0, Math.ceil(ratio * displayMax));
     }
 
-    const sessionMax = maxTime && maxTime > 0 ? maxTime : this.maxSessionTime;
     if (percentComplete != null && Number.isFinite(percentComplete)) {
       const pct = percentComplete <= 1 ? percentComplete * 100 : percentComplete;
-      return Math.max(
-        0,
-        Math.ceil(((100 - Math.min(100, Math.max(0, pct))) / 100) * sessionMax),
-      );
+      const remainingPct = 100 - Math.min(100, Math.max(0, pct));
+      return Math.max(0, Math.ceil((remainingPct / 100) * displayMax));
     }
 
     return 0;
@@ -1334,8 +1496,9 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.clearFaceGuide();
     this.clearQualityWarnings();
     this.clearScanTimers();
+    this.pendingAuthorizedVitalsListener = null;
 
-    await this.mindsetSdkRuntime.releaseAfterCapture();
+    await this.mindsetSdkRuntime.releaseAfterCapture(this.captureEpoch);
     this.vitalClient = null;
 
     if (this.mediaStream) {
