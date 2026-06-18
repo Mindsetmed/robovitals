@@ -105,6 +105,22 @@ export function isRrOutOfRangeForRetry(row?: VitalResultRow): boolean {
   return row?.id === 'rr' && row.kind === 'out_of_range';
 }
 
+export function isPrUnmeasurableForRetry(row?: VitalResultRow): boolean {
+  return row?.id === 'pr' && row.kind === 'unmeasurable';
+}
+
+export function isRrUnmeasurableForRetry(row?: VitalResultRow): boolean {
+  return row?.id === 'rr' && row.kind === 'unmeasurable';
+}
+
+export function isPrRetryEligible(row?: VitalResultRow): boolean {
+  return isPrOutOfRangeForRetry(row) || isPrUnmeasurableForRetry(row);
+}
+
+export function isRrRetryEligible(row?: VitalResultRow): boolean {
+  return isRrOutOfRangeForRetry(row) || isRrUnmeasurableForRetry(row);
+}
+
 export function getAuthorizedPrRrTagsForRetry(
   authorizedTags: string[],
   resultRows: VitalResultRow[],
@@ -112,11 +128,11 @@ export function getAuthorizedPrRrTagsForRetry(
   const byId = new Map(resultRows.map((row) => [row.id, row]));
   const tags: string[] = [];
 
-  if (isPrOutOfRangeForRetry(byId.get('pr'))) {
+  if (isPrRetryEligible(byId.get('pr'))) {
     tags.push(...authorizedTags.filter((tag) => tag.startsWith('PR_')));
   }
 
-  if (isRrOutOfRangeForRetry(byId.get('rr'))) {
+  if (isRrRetryEligible(byId.get('rr'))) {
     tags.push(...authorizedTags.filter((tag) => tag.startsWith('RR_')));
   }
 

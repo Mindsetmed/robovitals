@@ -276,12 +276,17 @@
                         </p>
 
                         <p class="hg-vitals-side-remaining"
+                            *ngIf="scanState === 'scanning_in_progress' && scanAttemptLabel">
+                            {{ scanAttemptLabel }}
+                        </p>
+
+                        <p class="hg-vitals-side-remaining"
                             *ngIf="scanState === 'scanning_in_progress' && scanSecondsRemaining > 0">
                             {{ scanSecondsRemaining }} seconds remaining
                         </p>
 
                         <div class="hg-vitals-side-ready" *ngIf="scanState === 'ready_to_scan'">
-                            <p class="hg-vitals-ready-title">Ready to scan</p>
+                            <p class="hg-vitals-ready-title">{{ readyScanTitle }}</p>
                             <p class="hg-vitals-ready-sub" *ngIf="!showCoachingTip">{{ readyScanSubtitle }}</p>
                             <p class="hg-vitals-coaching-tip" *ngIf="showCoachingTip && !showSideWarning">{{ coachingTip
                                 }}</p>
