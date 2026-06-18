@@ -3,6 +3,14 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
+export interface MindsetVitalsAuthorizeResponse {
+  success: boolean;
+  vitalCoreAuth?: unknown;
+  message?: string;
+  error?: string;
+  notificationType?: string;
+}
+
 export interface MindsetVitalsCaptureRequest {
   pulseRate?: number;
   breathingRate?: number;
@@ -124,20 +132,11 @@ export class MindsetVitalsService {
   authorizeVitals(
     patientId: string,
     runToken: unknown,
-  ): Observable<{
-    success: boolean;
-    vitalCoreAuth?: { authToken?: string; vitals?: Array<{ tag?: string }> };
-    message?: string;
-    error?: string;
-    notificationType?: string;
-  }> {
-    return this.http.post<{
-      success: boolean;
-      vitalCoreAuth?: { authToken?: string; vitals?: Array<{ tag?: string }> };
-      message?: string;
-      error?: string;
-      notificationType?: string;
-    }>(`${this.apiUrl}/${encodeURIComponent(patientId)}/authorize`, { runToken });
+  ): Observable<MindsetVitalsAuthorizeResponse> {
+    return this.http.post<MindsetVitalsAuthorizeResponse>(
+      `${this.apiUrl}/${encodeURIComponent(patientId)}/authorize`,
+      { runToken },
+    );
   }
 
   captureVitals(patientId: string, request: MindsetVitalsCaptureRequest): Observable<MindsetVitalsCaptureResponse> {

@@ -117,11 +117,18 @@ const METRIC_DEFS: Record<
   },
 };
 
+export function hasAuthorizedVitalPrefix(tags: string[], prefix: string): boolean {
+  return tags.some((tag) => tag.startsWith(`${prefix}_`));
+}
+
 export function vitalTagsToCaptureCards(tags: string[]): VitalCaptureCard[] {
-  const normalized = tags?.length ? tags : ['PR_MD', 'RR_MD'];
+  if (!tags?.length) {
+    return [];
+  }
+
   const cards: VitalCaptureCard[] = [];
   const add = (match: (t: string) => boolean, card: VitalCaptureCard) => {
-    if (normalized.some(match) && !cards.some((c) => c.shortLabel === card.shortLabel)) {
+    if (tags.some(match) && !cards.some((c) => c.shortLabel === card.shortLabel)) {
       cards.push(card);
     }
   };
@@ -131,12 +138,7 @@ export function vitalTagsToCaptureCards(tags: string[]): VitalCaptureCard[] {
   add((t) => t.startsWith('BP_'), { key: 'BP', shortLabel: 'BP' });
   add((t) => t.startsWith('SPO2_'), { key: 'SpO2', shortLabel: 'SpO₂' });
 
-  return cards.length
-    ? cards
-    : [
-      { key: 'PR', shortLabel: 'PR' },
-      { key: 'RR', shortLabel: 'RR' },
-    ];
+  return cards;
 }
 
 function rangeStatus(value: number, min: number, max: number): boolean {

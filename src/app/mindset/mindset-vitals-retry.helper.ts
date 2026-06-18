@@ -1,20 +1,32 @@
+import { VitalResultDisplayKind, VitalResultRow } from './vitals-display.helper';
+
 export const MINDSET_VITALS_MAX_ATTEMPTS = 3;
 
 export interface MindsetVitalMeasureClient {
   start(vitals: string[], videoEl: HTMLVideoElement): Promise<unknown>;
-  stop?(): Promise<unknown>;
   on(event: 'stop', handler: (result: unknown) => void): void;
   off(event: 'stop', handler: (result: unknown) => void): void;
 }
 
-export interface MindsetMeasureOnceOptions {
-  attemptNumber?: number;
-  attemptTimeoutMs?: number;
-  onMeasureStarted?: () => void;
+export interface BpRetryEligibility {
+  authorizedTags: string[];
+  bpRetryUsed: boolean;
+  bpRetryInProgress: boolean;
+  bpResultKind?: VitalResultDisplayKind;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export interface PrRrRetryEligibility {
+  authorizedTags: string[];
+  prRrRetryUsed: boolean;
+  prRrRetryInProgress: boolean;
+  bpRetryInProgress: boolean;
+  resultRows: VitalResultRow[];
+}
+
+export interface MeasureWithRetriesOptions {
+  maxAttempts?: number;
+  onAttemptStarted?: (attempt: number, maxAttempts: number, vitals: string[]) => void;
+  onAttemptComplete?: (attempt: number) => void;
 }
 
 function readPositiveNumber(value: unknown): number | undefined {
@@ -25,183 +37,169 @@ function readPositiveNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function extractFinalVitalsMap(result: Record<string, unknown>): Record<string, Record<string, unknown>> {
+  const finalValues = result['finalVitalsMeasurementValues'];
+  if (finalValues && typeof finalValues === 'object') {
+    return finalValues as Record<string, Record<string, unknown>>;
+  }
+
+  const vitalsWrapper = result['vitals'];
+  if (vitalsWrapper && typeof vitalsWrapper === 'object') {
+    const inner = (vitalsWrapper as Record<string, unknown>)['vitals'];
+    if (inner && typeof inner === 'object') {
+      return inner as Record<string, Record<string, unknown>>;
+    }
+  }
+
+  return {};
+}
+
+function extractSignsMsgs(result: Record<string, unknown>): Record<string, unknown> {
+  const signs = result['signsMsgs'];
+  return signs && typeof signs === 'object' ? (signs as Record<string, unknown>) : {};
+}
+
+function isNonEmptySigns(signs: Record<string, unknown> | undefined): boolean {
+  return !!signs && Object.keys(signs).length > 0;
+}
+
 export function gotVitalReading(tag: string, value: Record<string, unknown> | undefined): boolean {
-  if (!value) {
+  if (!value || typeof value !== 'object') {
     return false;
   }
+
+  if (tag.startsWith('BP_')) {
+    const systolic = readPositiveNumber(value['BP_SYS'] ?? value['sbp_mmHg']);
+    const diastolic = readPositiveNumber(value['BP_DIA'] ?? value['dbp_mmHg']);
+    return systolic != null && diastolic != null;
+  }
+
   if (tag.startsWith('PR_')) {
     return readPositiveNumber(value['hr']) != null;
   }
+
   if (tag.startsWith('RR_')) {
     return readPositiveNumber(value['rr']) != null;
   }
+
   if (tag.startsWith('SPO2_')) {
     return readPositiveNumber(value['spO2']) != null;
   }
-  if (tag.startsWith('BP_')) {
-    return (
-      readPositiveNumber(value['BP_SYS']) != null && readPositiveNumber(value['BP_DIA']) != null
-    );
+
+  return Object.keys(value).length > 0;
+}
+
+export function getAuthorizedBpTags(authorizedTags: string[]): string[] {
+  return authorizedTags.filter((tag) => tag.startsWith('BP_'));
+}
+
+export function isBpAuthorized(authorizedTags: string[]): boolean {
+  return getAuthorizedBpTags(authorizedTags).length > 0;
+}
+
+export function isPrOutOfRangeForRetry(row?: VitalResultRow): boolean {
+  return row?.id === 'pr' && row.kind === 'out_of_range';
+}
+
+export function isRrOutOfRangeForRetry(row?: VitalResultRow): boolean {
+  return row?.id === 'rr' && row.kind === 'out_of_range';
+}
+
+export function getAuthorizedPrRrTagsForRetry(
+  authorizedTags: string[],
+  resultRows: VitalResultRow[],
+): string[] {
+  const byId = new Map(resultRows.map((row) => [row.id, row]));
+  const tags: string[] = [];
+
+  if (isPrOutOfRangeForRetry(byId.get('pr'))) {
+    tags.push(...authorizedTags.filter((tag) => tag.startsWith('PR_')));
   }
-  return false;
+
+  if (isRrOutOfRangeForRetry(byId.get('rr'))) {
+    tags.push(...authorizedTags.filter((tag) => tag.startsWith('RR_')));
+  }
+
+  return [...new Set(tags)];
 }
 
-export function measureOnce(
-  client: MindsetVitalMeasureClient,
-  vitals: string[],
-  videoEl: HTMLVideoElement,
-  options: MindsetMeasureOnceOptions = {},
-): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const attemptNumber = options.attemptNumber ?? 0;
-    let settled = false;
-    let measurementStarted = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+export function canOfferBpRetry(params: BpRetryEligibility): boolean {
+  if (params.bpRetryUsed || params.bpRetryInProgress) {
+    return false;
+  }
 
-    const finish = (action: () => void): void => {
-      console.log('[Vitals Retry] Finish called', {
-        attemptNumber,
-        settledBefore: settled,
-      });
+  if (params.bpResultKind !== 'unmeasurable') {
+    return false;
+  }
 
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      client.off('stop', onStop);
-      action();
-    };
-
-    const onStop = (result: unknown): void => {
-      console.log('[Vitals Retry] Stop event received', {
-        attemptNumber,
-        settled,
-        result,
-      });
-
-      if (!measurementStarted) {
-        return;
-      }
-
-      if (settled) {
-        console.log('[Vitals Retry] Ignoring duplicate stop event', {
-          attemptNumber,
-        });
-        return;
-      }
-
-      finish(() => {
-        console.log('[Vitals Retry] Promise settled', {
-          attemptNumber,
-          outcome: 'resolved',
-        });
-        resolve((result ?? {}) as Record<string, unknown>);
-      });
-    };
-
-    client.on('stop', onStop);
-
-    const attemptTimeoutMs = options.attemptTimeoutMs;
-    if (attemptTimeoutMs && attemptTimeoutMs > 0 && client.stop) {
-      timeoutId = setTimeout(() => {
-        if (!measurementStarted || settled) {
-          return;
-        }
-
-        void client.stop!()
-          .then((result) => {
-            finish(() => {
-              console.log('[Vitals Retry] Promise settled', {
-                attemptNumber,
-                outcome: 'resolved',
-              });
-              resolve((result ?? {}) as Record<string, unknown>);
-            });
-          })
-          .catch((error: unknown) => {
-            finish(() => {
-              console.log('[Vitals Retry] Promise settled', {
-                attemptNumber,
-                outcome: 'rejected',
-              });
-              reject(error);
-            });
-          });
-      }, attemptTimeoutMs);
-    }
-
-    void client
-      .start(vitals, videoEl)
-      .then(() => {
-        measurementStarted = true;
-        console.log('[Vitals Retry] Attempt started', attemptNumber);
-        options.onMeasureStarted?.();
-      })
-      .catch((error: unknown) => {
-        finish(() => {
-          console.log('[Vitals Retry] Promise settled', {
-            attemptNumber,
-            outcome: 'rejected',
-          });
-          reject(error);
-        });
-      });
-  });
+  return isBpAuthorized(params.authorizedTags);
 }
 
-export interface MindsetMeasureWithRetriesOptions {
-  maxAttempts?: number;
-  attemptTimeoutMs?: number;
-  delayBetweenAttemptsMs?: number;
-  onAttemptStarted?: (attempt: number, maxAttempts: number, vitals: string[]) => void;
-  onAttemptComplete?: (
-    attempt: number,
-    collected: Record<string, Record<string, unknown>>,
-  ) => void;
+export function canOfferPrRrRetry(params: PrRrRetryEligibility): boolean {
+  if (params.prRrRetryUsed || params.prRrRetryInProgress || params.bpRetryInProgress) {
+    return false;
+  }
+
+  return getAuthorizedPrRrTagsForRetry(params.authorizedTags, params.resultRows).length > 0;
 }
 
-function isNonEmptySigns(signs: Record<string, unknown>): boolean {
-  return Object.keys(signs).length > 0;
+export function canShowResultsRetry(params: {
+  scanFailed: boolean;
+  bp: BpRetryEligibility;
+  prRr: PrRrRetryEligibility;
+}): boolean {
+  if (params.scanFailed) {
+    return true;
+  }
+
+  return canOfferBpRetry(params.bp) || canOfferPrRrRetry(params.prRr);
 }
 
-function buildSignsFromAttempts(
-  signsByAttempt: Record<string, unknown>[],
+export function resolveMeasurementVitals(
+  authorizedTags: string[],
+  options?: { bpRetryOnly?: boolean; prRrRetryOnly?: string[] },
+): string[] {
+  if (options?.bpRetryOnly) {
+    const bpTags = getAuthorizedBpTags(authorizedTags);
+    console.info('[Vitals Retry] BP-only measurement tags:', bpTags);
+    return bpTags;
+  }
+
+  if (options?.prRrRetryOnly?.length) {
+    console.info('[Vitals Retry] PR/RR retry measurement tags:', options.prRrRetryOnly);
+    return options.prRrRetryOnly;
+  }
+
+  return [...authorizedTags];
+}
+
+export function buildSignsFromAttempts(
+  attempts: Array<{ signsMsgs: Record<string, unknown> }>,
 ): { signsMsgs: Record<string, unknown>; prevSignsMsgs: Record<string, unknown>[] } {
-  if (signsByAttempt.length === 0) {
-    return { signsMsgs: {}, prevSignsMsgs: [] };
-  }
+  console.log(
+    '[Vitals Retry] Attempts summary',
+    attempts.map((attempt, index) => ({
+      attempt: index + 1,
+      signsMsgs: attempt.signsMsgs,
+    })),
+  );
 
-  let signsMsgsIndex = -1;
-  for (let i = signsByAttempt.length - 1; i >= 0; i--) {
-    if (isNonEmptySigns(signsByAttempt[i])) {
-      signsMsgsIndex = i;
+  let selectedIndex = -1;
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    if (isNonEmptySigns(attempts[index].signsMsgs)) {
+      selectedIndex = index;
       break;
     }
   }
 
-  const signsMsgs = signsMsgsIndex >= 0 ? signsByAttempt[signsMsgsIndex] : {};
+  const signsMsgs = selectedIndex >= 0 ? attempts[selectedIndex].signsMsgs : {};
   const prevSignsMsgs: Record<string, unknown>[] = [];
 
-  for (let i = signsByAttempt.length - 1; i >= 0; i--) {
-    if (i === signsMsgsIndex) {
-      continue;
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    if (index !== selectedIndex) {
+      prevSignsMsgs.push(attempts[index].signsMsgs ?? {});
     }
-
-    prevSignsMsgs.push(signsByAttempt[i]);
   }
-
-  console.log(
-    '[Vitals Retry] Attempts summary',
-    signsByAttempt.map((signsMsgs, index) => ({
-      attempt: index + 1,
-      signsMsgs,
-    })),
-  );
 
   console.log('[Vitals Retry] Final signs selection', {
     selectedSignsMsgs: signsMsgs,
@@ -214,90 +212,126 @@ function buildSignsFromAttempts(
 function mergeCollectedIntoStopEnvelope(
   lastStopEnvelope: Record<string, unknown> | null,
   collected: Record<string, Record<string, unknown>>,
-  signsByAttempt: Record<string, unknown>[],
+  signsByAttempt: Array<{ signsMsgs: Record<string, unknown> }>,
 ): Record<string, unknown> {
-  const hasCollected = Object.keys(collected).length > 0;
   const { signsMsgs, prevSignsMsgs } = buildSignsFromAttempts(signsByAttempt);
+  const merged: Record<string, unknown> = { ...(lastStopEnvelope ?? {}) };
 
-  if (!lastStopEnvelope) {
-    return {
-      vitals: { vitals: collected },
-      finalVitalsMeasurementValues: collected,
-      signsMsgs,
-      prevSignsMsgs,
-      noValidMeasurements: !hasCollected,
-    };
-  }
-
-  const merged: Record<string, unknown> = { ...lastStopEnvelope };
-  const existingVitalsWrapper =
+  merged['finalVitalsMeasurementValues'] = collected;
+  const vitalsWrapper =
     merged['vitals'] && typeof merged['vitals'] === 'object'
       ? (merged['vitals'] as Record<string, unknown>)
       : {};
-
-  merged['vitals'] = { ...existingVitalsWrapper, vitals: collected };
-  merged['finalVitalsMeasurementValues'] = collected;
+  merged['vitals'] = { ...vitalsWrapper, vitals: collected };
   merged['signsMsgs'] = signsMsgs;
   merged['prevSignsMsgs'] = prevSignsMsgs;
-  merged['noValidMeasurements'] = !hasCollected;
+  merged['noValidMeasurements'] = Object.keys(collected).length === 0;
 
   return merged;
+}
+
+export function measureOnce(
+  client: MindsetVitalMeasureClient,
+  vitals: string[],
+  videoEl: HTMLVideoElement,
+  attemptNumber: number,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const finish = (outcome: 'resolved' | 'rejected', value: unknown): void => {
+      console.log('[Vitals Retry] Finish called', {
+        attemptNumber,
+        settledBefore: settled,
+      });
+
+      if (settled) {
+        console.log('[Vitals Retry] Ignoring duplicate stop event', {
+          attemptNumber,
+        });
+        return;
+      }
+
+      settled = true;
+      client.off('stop', onStop);
+
+      console.log('[Vitals Retry] Promise settled', {
+        attemptNumber,
+        outcome,
+      });
+
+      if (outcome === 'resolved') {
+        resolve((value ?? {}) as Record<string, unknown>);
+        return;
+      }
+
+      reject(value);
+    };
+
+    const onStop = (result: unknown): void => {
+      console.log('[Vitals Retry] Stop event received', {
+        attemptNumber,
+        settled,
+        result,
+      });
+      finish('resolved', result);
+    };
+
+    console.log('[Vitals Retry] Attempt started', attemptNumber);
+    client.on('stop', onStop);
+    void client.start(vitals, videoEl).catch((error: unknown) => {
+      finish('rejected', error);
+    });
+  });
 }
 
 export async function measureWithRetries(
   client: MindsetVitalMeasureClient,
   videoEl: HTMLVideoElement,
   wantedVitals: string[],
-  options: MindsetMeasureWithRetriesOptions = {},
+  options?: MeasureWithRetriesOptions,
 ): Promise<Record<string, unknown>> {
-  const maxAttempts = options.maxAttempts ?? MINDSET_VITALS_MAX_ATTEMPTS;
-  const delayBetweenAttemptsMs = options.delayBetweenAttemptsMs ?? 400;
+  const maxAttempts = options?.maxAttempts ?? MINDSET_VITALS_MAX_ATTEMPTS;
   const collected: Record<string, Record<string, unknown>> = {};
-  const signsByAttempt: Record<string, unknown>[] = [];
+  const signsByAttempt: Array<{ signsMsgs: Record<string, unknown> }> = [];
   let lastStopEnvelope: Record<string, unknown> | null = null;
-  let activeAttempt = 0;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const stillNeeded = wantedVitals.filter((tag) => !gotVitalReading(tag, collected[tag]));
     if (stillNeeded.length === 0) {
+      console.log('[Vitals Retry] All wanted vitals collected before attempt', attempt);
       break;
     }
 
-    activeAttempt = attempt;
+    options?.onAttemptStarted?.(attempt, maxAttempts, stillNeeded);
 
-    if (attempt > 1) {
-      await sleep(delayBetweenAttemptsMs);
-      if (activeAttempt !== attempt) {
-        break;
+    const attemptResult = await measureOnce(client, stillNeeded, videoEl, attempt);
+    lastStopEnvelope = attemptResult;
+    signsByAttempt.push({ signsMsgs: extractSignsMsgs(attemptResult) });
+
+    const readings = extractFinalVitalsMap(attemptResult);
+    for (const [tag, reading] of Object.entries(readings)) {
+      if (wantedVitals.includes(tag) && gotVitalReading(tag, reading)) {
+        collected[tag] = reading;
       }
     }
 
-    const result = await measureOnce(client, stillNeeded, videoEl, {
-      attemptNumber: attempt,
-      attemptTimeoutMs: options.attemptTimeoutMs,
-      onMeasureStarted: () => {
-        if (activeAttempt !== attempt) {
-          return;
-        }
-
-        options.onAttemptStarted?.(attempt, maxAttempts, stillNeeded);
-      },
-    });
-    lastStopEnvelope = result;
-    const readings = (result['finalVitalsMeasurementValues'] ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >;
-
-    stillNeeded.forEach((tag) => {
-      if (gotVitalReading(tag, readings[tag])) {
-        collected[tag] = readings[tag];
-      }
-    });
-
-    signsByAttempt.push((result['signsMsgs'] ?? {}) as Record<string, unknown>);
-    options.onAttemptComplete?.(attempt, collected);
+    options?.onAttemptComplete?.(attempt);
   }
 
   return mergeCollectedIntoStopEnvelope(lastStopEnvelope, collected, signsByAttempt);
+}
+
+export async function runAuthorizedBpRetry(
+  client: MindsetVitalMeasureClient,
+  authorizedTags: string[],
+  videoEl: HTMLVideoElement,
+): Promise<Record<string, unknown>> {
+  const bpTags = getAuthorizedBpTags(authorizedTags);
+  if (!bpTags.length) {
+    throw new Error('BP is not authorized for retry.');
+  }
+
+  console.info('[Vitals Retry] Starting authorized BP retry with tags:', bpTags);
+  return measureOnce(client, bpTags, videoEl, 1);
 }

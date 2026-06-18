@@ -9,6 +9,7 @@ import {
   MINDSET_VITALS_WORKER_DIRECTORY,
 } from './mindset-vitals-sdk.paths';
 import { MindsetVitalsService } from './mindset-vitals.service';
+import { summarizeEncryptedVitalCoreAuth } from './mindset-vitals-auth.helper';
 
 export type MindsetVitalClient = ReturnType<typeof createVitalClient>;
 
@@ -398,6 +399,10 @@ export class MindsetVitalsSdkRuntimeService {
         if (!response?.success || !response.vitalCoreAuth) {
           throw new Error(response?.message || 'Authorization failed');
         }
+        console.info(
+          '[Vitals Auth] API authorize response — passing encrypted vitals_auth to SDK',
+          summarizeEncryptedVitalCoreAuth(response.vitalCoreAuth),
+        );
         return response.vitalCoreAuth;
       },
     });
