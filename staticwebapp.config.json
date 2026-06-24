@@ -4,7 +4,7 @@
 
     "rewrite": "/index.html",
 
-    "exclude": ["/assets/*", "/*.{css,js,wasm,data,tflite,png,jpg,svg,ico,map,json}"]
+    "exclude": ["/assets/*", "/instructions/*", "/*.{css,js,wasm,data,tflite,png,jpg,svg,ico,map,json,pdf}"]
 
   },
 

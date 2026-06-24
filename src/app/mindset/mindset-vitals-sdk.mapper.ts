@@ -24,15 +24,30 @@ export function buildSdkVitalsSubmissionPayload(sdkResult: unknown): Record<stri
 export function prepareSdkVitalsSubmissionPayload(
   sdkResult: unknown,
   vitalCoreVersion?: string | null,
+  userAgent?: string | null,
 ): Record<string, unknown> {
   const payload = buildSdkVitalsSubmissionPayload(sdkResult);
   const version = vitalCoreVersion?.trim();
+  const browserUserAgent = userAgent?.trim() || resolveBrowserUserAgent();
 
   if (version && payload['vitalCoreVersion'] == null) {
     payload['vitalCoreVersion'] = version;
   }
 
+  if (browserUserAgent && payload['user_agent'] == null) {
+    payload['user_agent'] = browserUserAgent;
+  }
+
   return payload;
+}
+
+function resolveBrowserUserAgent(): string | undefined {
+  if (typeof navigator === 'undefined') {
+    return undefined;
+  }
+
+  const agent = navigator.userAgent?.trim();
+  return agent || undefined;
 }
 
 function readNumber(value: unknown): number | undefined {
@@ -82,66 +97,6 @@ function sdkResultHasMeasurements(result: Record<string, unknown>): boolean {
   return Object.keys(extractSdkVitalsMap(result)).length > 0;
 }
 
-export function mergeBpRetryIntoBaseResult(
-  base: unknown,
-  bpRetry: unknown,
-): Record<string, unknown> {
-  return mergeTaggedRetryIntoBaseResult(base, bpRetry, (tag) => tag.startsWith('BP_'));
-}
-
-export function mergePrRrRetryIntoBaseResult(
-  base: unknown,
-  prRrRetry: unknown,
-): Record<string, unknown> {
-  return mergeTaggedRetryIntoBaseResult(
-    base,
-    prRrRetry,
-    (tag) => tag.startsWith('PR_') || tag.startsWith('RR_'),
-  );
-}
-
-export function mergeTaggedRetryIntoBaseResult(
-  base: unknown,
-  retry: unknown,
-  tagMatcher: (tag: string) => boolean,
-): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...((base ?? {}) as Record<string, unknown>) };
-  const retryRecord = (retry ?? {}) as Record<string, unknown>;
-  const mergedValues = { ...extractSdkVitalsMap(merged) };
-
-  for (const [tag, reading] of Object.entries(extractSdkVitalsMap(retryRecord))) {
-    if (tagMatcher(tag)) {
-      mergedValues[tag] = reading;
-    }
-  }
-
-  merged['finalVitalsMeasurementValues'] = mergedValues;
-  const vitalsWrapper =
-    merged['vitals'] && typeof merged['vitals'] === 'object'
-      ? (merged['vitals'] as Record<string, unknown>)
-      : {};
-  merged['vitals'] = { ...vitalsWrapper, vitals: mergedValues };
-
-  const retrySigns = retryRecord['signsMsgs'];
-  if (!isEmptyRecord(retrySigns)) {
-    const baseSigns = merged['signsMsgs'];
-    if (!isEmptyRecord(baseSigns)) {
-      const prev = Array.isArray(merged['prevSignsMsgs']) ? merged['prevSignsMsgs'] : [];
-      merged['prevSignsMsgs'] = [baseSigns, ...prev];
-    }
-    merged['signsMsgs'] = retrySigns;
-  }
-
-  const retryPrevSigns = retryRecord['prevSignsMsgs'];
-  if (Array.isArray(retryPrevSigns) && retryPrevSigns.length > 0) {
-    const existing = Array.isArray(merged['prevSignsMsgs']) ? merged['prevSignsMsgs'] : [];
-    merged['prevSignsMsgs'] = [...retryPrevSigns, ...existing];
-  }
-
-  merged['noValidMeasurements'] = Object.keys(mergedValues).length === 0;
-  return merged;
-}
-
 function pickAuthorizedVitalReading(
   finalValues: Record<string, Record<string, unknown>>,
   authorized: Set<string>,
@@ -186,7 +141,11 @@ export function mapSdkStopResultToCaptureRequest(
   authorizedTags?: string[],
 ): MappedVitalsCaptureResult {
   const result = (sdkResult ?? {}) as Record<string, unknown>;
-  const sdkVitalsPayload = prepareSdkVitalsSubmissionPayload(sdkResult, vitalCoreVersion);
+  const sdkVitalsPayload = prepareSdkVitalsSubmissionPayload(
+    sdkResult,
+    vitalCoreVersion,
+    resolveBrowserUserAgent(),
+  );
   const authorized = new Set(authorizedTags ?? []);
 
   if (!sdkResultHasAuthorizedMeasurements(result, authorized)) {

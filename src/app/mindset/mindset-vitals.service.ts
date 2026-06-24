@@ -18,6 +18,7 @@ export interface MindsetVitalsCaptureRequest {
   bloodPressureDiastolic?: number;
   oxygenSaturation?: number;
   sdkVitalsPayload?: unknown;
+  clientUserAgent?: string;
 }
 
 export interface MindsetPatientRegistration {
@@ -136,6 +137,13 @@ export class MindsetVitalsService {
     return this.http.post<MindsetVitalsAuthorizeResponse>(
       `${this.apiUrl}/${encodeURIComponent(patientId)}/authorize`,
       { runToken },
+    );
+  }
+
+  createNewProSubmission(patientId: string): Observable<{ success: boolean; message?: string }> {
+    return this.http.post<{ success: boolean; message?: string }>(
+      `${this.apiUrl}/${encodeURIComponent(patientId)}/new-pro`,
+      {},
     );
   }
 

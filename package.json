@@ -8,6 +8,7 @@
     "start": "ng serve --port 4200",
     "build": "ng build",
     "postbuild": "node scripts/postbuild-copy-deploy-files.js",
+    "generate-ifu-pdf": "node scripts/generate-instructions-pdf.js",
     "watch": "ng build --watch --configuration development"
   },
   "private": true,

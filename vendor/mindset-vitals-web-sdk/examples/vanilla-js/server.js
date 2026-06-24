@@ -28,6 +28,12 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increase limit for signsMsgs data
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+app.use((_, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  next();
+});
+
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -181,6 +187,80 @@ app.post('/auth', async (req, res) => {
       message: 'Authorization failed',
       error: error.message
     });
+  }
+});
+
+/**
+ * POST /patient/new-pro - Create a fresh PRO submission for another session.
+ *
+ * The SDK's vital-core authorization (the WASM license check) only needs to
+ * happen once per page load, so we don't re-run /auth for a second measurement.
+ * But each session needs its OWN pro_submission to write to, otherwise the new
+ * results overwrite the previous PRO. Creating a notification of a PRO type
+ * makes a new pro_submission server-side (meta.pro_submission_id); we do that
+ * here WITHOUT a vitals_run_token (that token is only for the WASM auth, which
+ * we're intentionally not redoing). The new id replaces the stored one so the
+ * next /patient/vitals PUT targets the fresh PRO.
+ */
+app.post('/patient/new-pro', async (req, res) => {
+  try {
+    if (!MINDSET_API_KEY || !CLINIC_ID) {
+      return res.status(400).json({
+        success: false,
+        message: 'Server not configured. Set MINDSET_API_KEY and CLINIC_ID in .env file.'
+      });
+    }
+
+    const { patientId } = req.body;
+    if (!patientId) {
+      return res.status(400).json({ success: false, message: 'Patient ID is required' });
+    }
+
+    console.log('Creating new PRO (notification) for patient:', patientId);
+
+    const notificationResponse = await fetch(`${MINDSET_API_URL}/users/${patientId}/notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${MINDSET_API_KEY}`
+      },
+      body: JSON.stringify({
+        clinic_id: CLINIC_ID,
+        notification_type: NOTIFICATION_TYPE,
+        trigger_text: false,
+        pre_auth: true
+        // no vitals_run_token: this is just to mint a new pro_submission
+      })
+    });
+
+    const notificationData = await notificationResponse.json();
+
+    if (notificationData.error) {
+      console.error('Mindset API error (new-pro notification):', notificationData);
+      return res.status(notificationData.statusCode || 500).json({
+        success: false,
+        message: notificationData.message || 'Failed to create PRO',
+        error: notificationData.error
+      });
+    }
+
+    const proSubmissionId = notificationData.meta?.pro_submission_id;
+    if (!proSubmissionId) {
+      console.error('new-pro: notification created but no pro_submission_id returned:', notificationData);
+      return res.status(500).json({
+        success: false,
+        message: 'No PRO submission id returned'
+      });
+    }
+
+    patientNotificationStore.set(patientId, proSubmissionId);
+    console.log('New PRO created:', { proSubmissionId });
+
+    res.json({ success: true, message: 'New PRO created' });
+
+  } catch (error) {
+    console.error('new-pro error:', error);
+    res.status(500).json({ success: false, message: 'Failed to create PRO', error: error.message });
   }
 });
 

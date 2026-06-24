@@ -1,0 +1,28 @@
+<div class="hg-ifu-page">
+  <header class="hg-ifu-header">
+    <div class="hg-ifu-header-brand">
+      <a routerLink="/" class="hg-ifu-back">Back</a>
+      <img [src]="logoPath" alt="RoboVitals AI" class="hg-ifu-logo">
+    </div>
+    <div class="hg-ifu-header-actions">
+      <button type="button" class="hg-ifu-action" (click)="printManual()">Print / Save PDF</button>
+      <a class="hg-ifu-action hg-ifu-action-secondary" [href]="pdfPath" target="_blank" rel="noopener noreferrer">
+        Download PDF
+      </a>
+    </div>
+  </header>
+
+  <iframe
+    id="rv-ifu-frame"
+    class="hg-ifu-frame"
+    [src]="manualUrl"
+    title="RoboVitals AI Instructions for Use">
+  </iframe>
+
+  <footer class="hg-ifu-footer">
+    <p>
+      Underlying vital-core reference:
+      <a [href]="mindsetEifuUrl" target="_blank" rel="noopener noreferrer">{{ mindsetEifuUrl }}</a>
+    </p>
+  </footer>
+</div>

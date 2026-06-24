@@ -3,6 +3,9 @@ import { HttpErrorResponse } from '@angular/common/http';
 export const MINDSET_VITALS_SERVICE_UNAVAILABLE_MESSAGE =
   'The vitals service is currently unavailable. Please try again in a few minutes. If the issue persists, contact support.';
 
+export const MINDSET_VITALS_SESSION_NOT_AUTHORIZED_MESSAGE =
+  'No PRO submission found for patient. Please authorize first.';
+
 export function isGatewayHttpStatus(status: number): boolean {
   return status === 502 || status === 503 || status === 504;
 }
@@ -30,6 +33,19 @@ export function extractMindsetVitalsApiErrorMessage(error: unknown): string | un
   }
 
   return undefined;
+}
+
+export function isMissingProSubmissionCaptureError(error: unknown): boolean {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 400) {
+    return false;
+  }
+
+  const message = extractMindsetVitalsApiErrorMessage(error);
+  if (!message) {
+    return false;
+  }
+
+  return message.toLowerCase().includes('no pro submission found');
 }
 
 const PATIENT_LOOKUP_NOT_FOUND_MESSAGE =

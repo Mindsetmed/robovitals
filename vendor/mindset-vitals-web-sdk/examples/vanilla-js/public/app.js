@@ -34,6 +34,10 @@ let countdownSetIntervalId = null;
 let startMeasurementBtnDisabled = true;
 let authorizedVitals = new Set();
 let currentWarnings = [];
+// The first session's PRO is created by authorize() -> /auth. authorize() is
+// cached after that (vital-core auth is once per page), so every LATER session
+// must mint its own PRO or it would overwrite the previous one's results.
+let hasMeasuredOnce = false;
 
 /**
  * Update warnings display
@@ -176,6 +180,11 @@ function clearPatient() {
   noPatientSelectedWarning.style.display = 'block';
   measurementControls.style.display = 'none';
 
+  // New patient starts fresh: first session again uses authorize -> /auth for its
+  // PRO, so reset the session flag and the button label.
+  hasMeasuredOnce = false;
+  startMeasurementBtn.textContent = 'Start Measurement';
+
   addLog('Patient cleared', 'info');
 }
 
@@ -286,9 +295,11 @@ async function initializeSDK() {
       addLog({ event: 'Measurement started', data }, 'info');
     });
 
+    // The measurement session is awaited via measureOnce() (once('stop')), and
+    // startMeasurement() owns the single save + flag/label update. This listener
+    // is just for logging, matching the vanilla-js-retries structure.
     vitalClient.on('stop', (result) => {
       addLog({ event: 'Measurement stopped', result }, 'info');
-      measurementStopped(result);
     });
 
     vitalClient.on('maxSessionTime', (duration) => {
@@ -380,10 +391,17 @@ function timeLeftListener(timeLeftData) {
  */
 async function startMeasurement() {
   try {
+    // Guard against a double-start: there are awaits below (authorize, new-pro)
+    // before measuring/disable take effect, so a fast second click could run a
+    // second session concurrently (two PROs, overlapping measurements).
+    if (measuring) return;
     if (!currentPatientId) {
       addLog({ error: 'No patient ID available' }, 'error');
       return;
     }
+    // Claim the session now and disable Start immediately, before any awaits.
+    measuring = true;
+    startMeasurementBtn.disabled = true;
 
     // SDK will call our authenticator callback with runToken
     // Authenticator uses currentPatientId from closure scope
@@ -391,6 +409,8 @@ async function startMeasurement() {
       await vitalClient.authorize();
     } catch (e) {
       console.log(e);
+      measuring = false;
+      startMeasurementBtn.disabled = false;
       return;
     }
 
@@ -398,20 +418,57 @@ async function startMeasurement() {
 
     if (selectedVitals.length === 0) {
       addLog({ error: 'No vitals authorized. Check authorization.' }, 'error');
+      measuring = false;
+      startMeasurementBtn.disabled = false;
       return;
+    }
+
+    // For a second-or-later session, authorize() was cached so /auth didn't run
+    // and no new PRO was minted. Create one now so we don't overwrite the prior
+    // session's PRO. (First session already has its PRO from authorize -> /auth.)
+    if (hasMeasuredOnce) {
+      addLog('Creating new PRO for this session...', 'info');
+      const proRes = await fetch('/patient/new-pro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientId: currentPatientId })
+      });
+      const proData = await proRes.json();
+      if (!proData.success) {
+        addLog({ error: 'Failed to create new PRO: ' + proData.message }, 'error');
+        measuring = false;
+        startMeasurementBtn.disabled = false;
+        return;
+      }
     }
 
     addLog({ event: 'Starting measurement', vitals: selectedVitals }, 'info');
     updateStatus('measuring', 'Measuring...');
 
-    measuring = true;
-    startMeasurementBtn.disabled = true;
+    // measuring/disable already set on entry; finish enabling the session UI.
     stopMeasurementBtn.disabled = false;
     progressSection.style.display = 'block';
     displayResults({});
 
-    // Start session with all authorized vitals
-    await vitalClient.start(selectedVitals, videoEl);
+    // Run one measurement session and wait for its result.
+    const result = await measureOnce(selectedVitals);
+
+    measuring = false;
+    clearInterval(countdownSetIntervalId);
+    startMeasurementBtn.disabled = false;
+    stopMeasurementBtn.disabled = true;
+    progressSection.style.display = 'none';
+    progressFill.style.width = '0%';
+    updateStatus('ready', 'Measurement complete');
+
+    displayResults(processVitalCoreResults(result));
+    await saveVitalsData(result);
+
+    // This session is done and saved (results submitted, good vitals or not); any
+    // further session must mint its own PRO. Relabel Start so it's clear to users
+    // and developers that the next click begins a brand-new session/PRO.
+    hasMeasuredOnce = true;
+    startMeasurementBtn.textContent = 'Start New Session';
 
   } catch (error) {
     addLog({ error: 'Failed to start measurement: ' + error.message }, 'error');
@@ -423,61 +480,34 @@ async function startMeasurement() {
 }
 
 /**
+ * Run one measurement session and resolve with its 'stop' result.
+ * once('stop', ...) gives us the result as a promise we can await. Manual Stop
+ * (stopMeasurement) calls vitalClient.stop(), which also resolves this.
+ */
+function measureOnce(vitals) {
+  return new Promise((resolve, reject) => {
+    const onStop = (result) => resolve(result);
+    vitalClient.once('stop', onStop);
+    vitalClient.start(vitals, videoEl).catch((err) => {
+      vitalClient.off('stop', onStop);
+      reject(err);
+    });
+  });
+}
+
+/**
  * Stop measurement
  */
 async function stopMeasurement() {
   try {
     addLog('Stopping measurement...', 'info');
-
-    measuring = false;
-    clearInterval(countdownSetIntervalId);
-    const result = await vitalClient.stop();
-
-    addLog({ event: 'Measurement stopped', result }, 'success');
-    updateStatus('ready', 'Measurement complete');
-
-    startMeasurementBtn.disabled = false;
-    stopMeasurementBtn.disabled = true;
-    progressSection.style.display = 'none';
-    progressFill.style.width = '0%';
-
-    // Parse results
-    if (result) {
-      // Save to server
-      await saveVitalsData(result);
-    }
-
+    // Just stop the session. measureOnce() in startMeasurement() is awaiting the
+    // 'stop' result and owns the single save + flag/label update, for both manual
+    // stop and the automatic session end. Don't save here too, or we'd submit twice.
+    await vitalClient.stop();
   } catch (error) {
     addLog({ error: error.message }, 'error');
     console.error('Stop measurement error:', error);
-  }
-}
-
-async function measurementStopped(result) {
-  try {
-    addLog({ event: 'Measurement stopped', result }, 'success');
-    updateStatus('ready', 'Measurement complete');
-
-    startMeasurementBtn.disabled = false;
-    stopMeasurementBtn.disabled = true;
-    progressSection.style.display = 'none';
-    progressFill.style.width = '0%';
-
-    clearInterval(countdownSetIntervalId);
-
-    // Parse and display results
-    if (result) {
-      console.log({ result })
-      const vitalsToDisplay = processVitalCoreResults(result);
-
-      displayResults(vitalsToDisplay);
-
-      // Save to server
-      await saveVitalsData(result);
-    }
-  } catch (error) {
-    addLog({ error: error.message }, 'error');
-    console.error('Measurement stopped error:', error); 
   }
 }
 

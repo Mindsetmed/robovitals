@@ -4171,7 +4171,7 @@ async function sc() {
     }
     const _selfieModelPromise = oe.createFromOptions(v, {
       baseOptions: {
-        modelAssetPath: `/${Ke}/selfie_multiclass_256x256.tflite?v=2.6.0`,
+        modelAssetPath: `/${Ke}/selfie_multiclass_256x256.tflite?v=2.6.0-2`,
         delegate: u
       },
       runningMode: e,
@@ -4181,7 +4181,7 @@ async function sc() {
     });
     const _faceModelPromise = _e.createFromOptions(v, {
       baseOptions: {
-        modelAssetPath: `/${Ke}/blaze_face_short_range.tflite?v=2.6.0`,
+        modelAssetPath: `/${Ke}/blaze_face_short_range.tflite?v=2.6.0-2`,
         delegate: u
       },
       runningMode: e,

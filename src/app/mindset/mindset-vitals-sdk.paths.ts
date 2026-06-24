@@ -1,6 +1,6 @@
 export const MINDSET_VITALS_WORKER_DIRECTORY = '/assets/mindset-vitals/dist';
 
-export const MINDSET_VITALS_SDK_ASSET_VERSION = '2.6.0';
+export const MINDSET_VITALS_SDK_ASSET_VERSION = '2.6.0-2';
 
 const BASE = MINDSET_VITALS_WORKER_DIRECTORY;
 

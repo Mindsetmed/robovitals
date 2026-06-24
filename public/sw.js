@@ -1,4 +1,4 @@
-const ASSET_VERSION = '2.6.0';
+const ASSET_VERSION = '2.6.0-2';
 const CACHE_NAME = `mindset-vitals-assets-${ASSET_VERSION}`;
 const ASSET_PREFIX = '/assets/mindset-vitals/';
 
@@ -25,7 +25,6 @@ async function precacheAssets(cache) {
           await cache.put(url, response);
         }
       } catch {
-        // Individual asset failures should not block install.
       }
     }),
   );

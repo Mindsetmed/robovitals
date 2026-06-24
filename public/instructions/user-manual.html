@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoboVitals AI — Instructions for Use</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="user-manual.css">
+</head>
+
+<body>
+  <div class="rv-page">
+    <header class="rv-hero">
+      <div class="rv-hero-orb rv-hero-orb-left" aria-hidden="true"></div>
+      <div class="rv-hero-orb rv-hero-orb-right" aria-hidden="true"></div>
+      <div class="rv-hero-grid" aria-hidden="true"></div>
+      <div class="rv-hero-inner">
+        <div class="rv-logo-wrap">
+          <img src="/assets/images/robovitals-ai-logo.png" alt="RoboVitals AI — AI-Powered Health Insights"
+            class="rv-logo" width="360" height="auto">
+        </div>
+        <h1 class="rv-hero-title">Instructions for Use</h1>
+        <p class="rv-hero-lead">Camera-based pulse and respiratory rate measurement</p>
+        <p class="rv-hero-meta">Hellogard Intelligence · Confidential — For patient and clinical review</p>
+      </div>
+    </header>
+
+    <main class="rv-manual-body">
+      <section class="rv-toc no-print" aria-label="Table of contents">
+        <h2>Contents</h2>
+        <p class="rv-section-lead">Browse sections or download the full manual.</p>
+        <ol class="rv-toc-list">
+          <li><a href="#glossary-of-symbols">Glossary of Symbols</a></li>
+          <li><a href="#getting-started">Getting Started</a></li>
+          <li><a href="#instructions-for-use">Instructions for Use</a></li>
+          <li><a href="#compatibility">Devices &amp; Operating Systems</a></li>
+          <li><a href="#cybersecurity">Cybersecurity &amp; Privacy</a></li>
+          <li><a href="#error-messages">Error Messages</a></li>
+          <li><a href="#support">Customer Support</a></li>
+        </ol>
+        <div class="rv-toc-actions">
+          <button type="button" class="rv-btn rv-btn-primary" onclick="window.print()">Print</button>
+          <a class="rv-btn rv-btn-secondary" href="user-manual.pdf">Download PDF</a>
+        </div>
+      </section>
+
+      <section id="glossary-of-symbols" aria-labelledby="glossary-title">
+        <h2 id="glossary-title">Glossary of Symbols</h2>
+        <table class="rv-table rv-glossary-table">
+          <thead>
+            <tr>
+              <th scope="col">Symbol</th>
+              <th scope="col">Symbol Title</th>
+              <th scope="col">Symbol Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rv-symbol-cell">
+                <span class="rv-symbol-badge rv-symbol-badge--ifu" aria-hidden="true">
+                  <svg class="rv-symbol-graphic" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 10h22l14 14v26a3 3 0 0 1-3 3H14a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z" stroke="currentColor" stroke-width="2.25" stroke-linejoin="round"/>
+                    <path d="M36 10v14h14" stroke="currentColor" stroke-width="2.25" stroke-linejoin="round"/>
+                    <path d="M18 24h18M18 32h26M18 40h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+                    <rect x="40" y="36" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="46" cy="42" r="1.5" fill="currentColor"/>
+                  </svg>
+                </span>
+              </td>
+              <td class="rv-symbol-title">Consult Instructions for Use</td>
+              <td>Indicates the need for the user to consult the Instructions for Use.</td>
+            </tr>
+            <tr>
+              <td class="rv-symbol-cell">
+                <span class="rv-symbol-badge rv-symbol-badge--caution" aria-hidden="true">
+                  <svg class="rv-symbol-graphic" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M32 9L56 52H8L32 9z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+                    <path d="M32 26v16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                    <circle cx="32" cy="48" r="2.25" fill="currentColor"/>
+                  </svg>
+                </span>
+              </td>
+              <td class="rv-symbol-title">Caution</td>
+              <td>Indicates that caution is necessary when operating the device or control close to where the symbol is placed, or that the current situation needs operator awareness or operator action in order to avoid undesirable consequences.</td>
+            </tr>
+            <tr>
+              <td class="rv-symbol-cell">
+                <span class="rv-symbol-badge rv-symbol-badge--manufacturer" aria-hidden="true">
+                  <svg class="rv-symbol-graphic" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10 50V28l10-8 10 5 12-10 12 8v27H10z" stroke="currentColor" stroke-width="2.25" stroke-linejoin="round"/>
+                    <path d="M24 25v25M40 20v30" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"/>
+                    <path d="M14 18l6-5 6 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M16 50h32" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"/>
+                  </svg>
+                </span>
+              </td>
+              <td class="rv-symbol-title">Manufacturer</td>
+              <td>Indicates the medical device manufacturer.</td>
+            </tr>
+            <tr>
+              <td class="rv-symbol-cell">
+                <span class="rv-symbol-badge rv-symbol-badge--rx" aria-hidden="true">
+                  <span class="rv-symbol-rx-mark">
+                    <span class="rv-symbol-rx-top">Rx</span>
+                    <span class="rv-symbol-rx-bottom">ONLY</span>
+                  </span>
+                </span>
+              </td>
+              <td class="rv-symbol-title">Prescription Use Only</td>
+              <td>Caution: Federal (US) law restricts this device to sale by or on the order of a physician. Indicates the product is indicated for professional use only.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="getting-started">
+        <h2>1. Getting Started</h2>
+        <h3>What is RoboVitals AI?</h3>
+        <p>RoboVitals AI is a web application that measures your vital signs using the camera on your smartphone,
+          tablet, laptop, or desktop computer. RoboVitals AI can be configured as a General Wellness application and/or
+          prescribed by your healthcare provider as a Software as a Medical Device (SaMD).</p>
+        <table class="rv-table rv-product-table">
+          <thead>
+            <tr>
+              <th scope="col">Icon</th>
+              <th scope="col">Product Use</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rv-symbol-cell">
+                <span class="rv-symbol-badge rv-symbol-badge--rx" aria-hidden="true">
+                  <span class="rv-symbol-rx-mark">
+                    <span class="rv-symbol-rx-top">Rx</span>
+                    <span class="rv-symbol-rx-bottom">ONLY</span>
+                  </span>
+                </span>
+              </td>
+              <td class="rv-symbol-title">Prescribed by Healthcare Provider (Rx Only)</td>
+              <td>You can identify the prescription measurement display by the
+                <span class="rv-inline-symbol rv-inline-symbol--rx" aria-hidden="true">
+                  <span class="rv-product-rx-mark rv-product-rx-mark--inline">
+                    <span class="rv-product-rx-left">Rx</span>
+                    <span class="rv-product-rx-right">ONLY</span>
+                  </span>
+                </span>
+                icon on pulse rate and respiratory rate results. Tap <strong>Submit</strong> to send results to your
+                healthcare provider.</td>
+            </tr>
+            <tr>
+              <td class="rv-symbol-cell">
+                <span class="rv-symbol-badge rv-symbol-badge--wellness" aria-hidden="true">
+                  <svg class="rv-product-wellness-svg" viewBox="0 0 23 19" fill="none"
+                    xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M7.31129 8.69141C8.65695 9.5 9.82292 10.5703 10.7373 11.8359C11.0168 12.2227 11.2724 12.6289 11.5 13.0469C11.7276 12.625 11.9832 12.2227 12.2627 11.8359C13.1771 10.5703 14.3431 9.5 15.6887 8.69141C17.4736 7.61719 19.57 7 21.8021 7H22.1974C22.6406 7 23 7.35156 23 7.78516C23 13.5664 18.2123 18.25 12.3026 18.25H11.5H10.6974C4.78767 18.25 0 13.5664 0 7.78516C0 7.35156 0.359375 7 0.802604 7H1.19792C3.43003 7 5.52639 7.61719 7.31129 8.69141ZM12.0391 0.96875C12.666 1.62891 14.4788 3.77344 15.4092 7.39844C13.8918 8.24219 12.5582 9.38281 11.5 10.7422C10.4418 9.38281 9.10816 8.24609 7.5908 7.39844C8.51719 3.77344 10.33 1.62891 10.9609 0.96875C11.1007 0.824219 11.2964 0.75 11.5 0.75C11.7036 0.75 11.8993 0.824219 12.0391 0.96875Z"
+                      fill="currentColor" />
+                  </svg>
+                </span>
+              </td>
+              <td class="rv-symbol-title">General Wellness (non-prescription)</td>
+              <td>You can identify general-wellness vitals (such as blood pressure or oxygen) by the
+                <span class="rv-inline-symbol rv-inline-symbol--wellness" aria-hidden="true">
+                  <svg class="rv-product-wellness-svg rv-product-wellness-svg--inline" viewBox="0 0 23 19" fill="none"
+                    xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M7.31129 8.69141C8.65695 9.5 9.82292 10.5703 10.7373 11.8359C11.0168 12.2227 11.2724 12.6289 11.5 13.0469C11.7276 12.625 11.9832 12.2227 12.2627 11.8359C13.1771 10.5703 14.3431 9.5 15.6887 8.69141C17.4736 7.61719 19.57 7 21.8021 7H22.1974C22.6406 7 23 7.35156 23 7.78516C23 13.5664 18.2123 18.25 12.3026 18.25H11.5H10.6974C4.78767 18.25 0 13.5664 0 7.78516C0 7.35156 0.359375 7 0.802604 7H1.19792C3.43003 7 5.52639 7.61719 7.31129 8.69141ZM12.0391 0.96875C12.666 1.62891 14.4788 3.77344 15.4092 7.39844C13.8918 8.24219 12.5582 9.38281 11.5 10.7422C10.4418 9.38281 9.10816 8.24609 7.5908 7.39844C8.51719 3.77344 10.33 1.62891 10.9609 0.96875C11.1007 0.824219 11.2964 0.75 11.5 0.75C11.7036 0.75 11.8993 0.824219 12.0391 0.96875Z"
+                      fill="currentColor" />
+                  </svg>
+                </span>
+                icon on those result cards. These readings are for information only and do not replace medical advice.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>RoboVitals AI is a browser-based application provided through your healthcare organization. Open the
+          application link in a supported browser on your smartphone, tablet, or computer. The link does not expire
+          after 72 hours — you can return to the same application URL whenever you need to measure your vitals,
+          unless your provider gives you a different access instruction.</p>
+
+        <h3>How it Works</h3>
+        <p>Each time your heart beats, your face shows tiny color changes that are invisible to the human eye.
+          Similarly, each time you breathe, your shoulders and torso move slightly. RoboVitals AI uses your camera to
+          detect subtle changes in facial coloration and shoulder motion to calculate pulse rate (PR) and respiratory
+          rate (RR) in real time.</p>
+
+        <h3>Before You Measure — Patient Identification</h3>
+        <ol>
+          <li>Open the RoboVitals AI application link in your browser.</li>
+          <li>Wait for <strong>AI-Powered Vital Monitoring</strong> to finish loading if a progress bar is shown.</li>
+          <li>Enter your <strong>Patient ID</strong> provided by your healthcare organization, or tap
+            <strong>Generate ID</strong> if instructed to create a new ID.</li>
+          <li>The app automatically looks up your patient record.
+            <ul>
+              <li><strong>Existing patient:</strong> When your record is found, tap <strong>Capture Vitals</strong>.</li>
+              <li><strong>New patient:</strong> Complete the registration fields (email, name, date of birth, height,
+                weight, and temperature), then tap <strong>Capture Vitals</strong> to create your record and continue.</li>
+            </ul>
+          </li>
+          <li>Tap the <strong>Help</strong> button at any time to open these Instructions for Use.</li>
+        </ol>
+
+        <h3>Measurement Session Overview</h3>
+        <ol>
+          <li>On the <strong>Health Insights</strong> screen, allow camera access when your browser prompts you.</li>
+          <li>Center your face in the on-screen guide and tap <strong>Start Scan</strong>.</li>
+          <li>Hold still while the scan runs (about 60 seconds). A progress indicator shows scan status.</li>
+          <li>When the scan finishes, review your pulse and breathing results on screen.</li>
+          <li>If prompted between attempts, choose <strong>Retry</strong> to measure again or <strong>Submit</strong>
+            to keep partial results you already have.</li>
+          <li>After all scan attempts, review your results and tap <strong>Submit</strong> to send them to your
+            healthcare provider, or <strong>Discard these results and restart scan</strong> to start over.</li>
+          <li>After a successful submit, review the results summary and tap <strong>Done</strong> to return to the
+            home screen with your Patient ID retained for another session.</li>
+        </ol>
+        <p><strong>NOTE:</strong> Tap <strong>Back</strong> at any time to exit and return to the home screen. This
+          clears your current session. Use <strong>Done</strong> after a successful measurement to start another
+          session for the same patient.</p>
+      </section>
+
+      <section id="instructions-for-use">
+        <h2>2. Instructions for Use</h2>
+        <p>Read this manual carefully and pay attention to the warnings and cautions throughout.</p>
+
+        <h3>Device Description</h3>
+        <p>RoboVitals AI is a software application that utilizes existing optical camera technology embedded in a
+          smartphone, tablet, or computer to estimate vital signs such as pulse and respiratory rate from a video
+          recording.</p>
+
+        <h3>Indications for Use</h3>
+        <p>RoboVitals AI is intended for non-invasive spot measurement of pulse and respiratory rate of adult patients
+          in home use, hospitals, clinics, and long-term care settings.</p>
+        <p>RoboVitals AI is indicated for use on adults 22 years of age or older who do not require critical care or
+          continuous vital signs monitoring.</p>
+        <p>RoboVitals AI is not intended to direct therapy independently.</p>
+
+        <h3>Contraindications</h3>
+        <p>The following facial conditions may impact the ability to measure your vital signs. Check with your
+          healthcare provider if you have any of the following:</p>
+        <ul>
+          <li>Scars or burns</li>
+          <li>Port wine stains or large birthmarks</li>
+          <li>Tattoos or henna</li>
+          <li>Rosacea, eczema, and rashes</li>
+          <li>Bruising</li>
+        </ul>
+
+        <h3>Warnings and Precautions</h3>
+        <p><strong>WARNING:</strong> RoboVitals AI should be used under the care of your physician. Always consult your
+          physician regarding clinical decisions. Do not rely on RoboVitals AI as the only basis for medical decisions;
+          pulse and respiratory rate measurements alone are not intended to direct medical care.</p>
+        <p><strong>CAUTION:</strong> To ensure proper operation, avoid distractions. Do not use RoboVitals AI while
+          driving, walking, or participating in any activity requiring your full attention.</p>
+        <p>Check the following to prevent inaccurate (or no) readings:</p>
+        <ul>
+          <li>Keep your face still and follow the on-screen guide during measurement. Do not eat, drink, or talk during
+            measurements.</li>
+          <li>Other apps should not be running simultaneously when using RoboVitals AI.</li>
+          <li>Stay away from devices (e.g., microwaves, cordless phones, Wi-Fi routers) that may interfere with
+            operation.</li>
+          <li>RoboVitals AI must have permission to use your device camera.</li>
+          <li>Ensure your camera is not cracked or dirty.</li>
+          <li>Do not use other camera-interfacing apps while using RoboVitals AI.</li>
+          <li>Ensure a stable Internet connection for RoboVitals AI to function and transmit results.</li>
+          <li>RoboVitals AI is for individual use. Do not share the application with someone else.</li>
+          <li>Not following on-screen instructions could result in no readings.</li>
+        </ul>
+        <p><strong>Note:</strong> RoboVitals AI will only report readings when there is high confidence in measurement
+          accuracy, but this is not guaranteed. If readings cannot be generated after multiple attempts, end the session
+          and notify your healthcare provider that the measurement was unsuccessful.</p>
+        <p>RoboVitals AI detects subtle color changes in the face as part of heart rate evaluation. Testing has shown
+          that the report rate may be lower for darker skin tones where color changes are harder to detect.</p>
+        <p><strong>CAUTION:</strong> Inaccurate heart rate measurements may also be caused by low arterial perfusion,
+          excessive motion, low lighting, loss of data transmission from the camera device, or elevated heart rate
+          greater than 103 beats per minute.</p>
+        <p><strong>CAUTION:</strong> Inaccurate respiratory rate measurements may be caused by excessive motion, camera
+          movement, or partial obstruction of the face, neck, or shoulders.</p>
+
+        <h3>Specifications</h3>
+        <table class="rv-table">
+          <thead>
+            <tr>
+              <th>Measurement</th>
+              <th>Declared / Displayed Range</th>
+              <th>Window</th>
+              <th>Location</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Heart Rate (Pulse Rate)</td>
+              <td>Displayed: 40–120 bpm · Declared accuracy range: 50–103 (±3) bpm</td>
+              <td>60 seconds</td>
+              <td>Face</td>
+            </tr>
+            <tr>
+              <td>Respiratory Rate</td>
+              <td>Displayed: 8–30 (±3) breaths per minute</td>
+              <td>60 seconds</td>
+              <td>Face, neck, and shoulders</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Data Analysis &amp; Limitations</h3>
+        <p>RoboVitals AI measures shoulder movement as part of respiratory rate evaluation. “Belly breathing”
+          (diaphragmatic breathing) may reduce report rate because the shoulders and thorax move less.</p>
+        <ul>
+          <li>Not intended as the sole method of checking physical health.</li>
+          <li>Not for arrhythmias or irregular heartbeats.</li>
+          <li>Not for continuous monitoring.</li>
+          <li>Not studied in people with certain movement disorders — consult your healthcare provider if unsure.</li>
+          <li>Unauthorized tampering with software may prevent correct operation.</li>
+        </ul>
+
+        <h3>Before You Start</h3>
+        <ul>
+          <li>Use the app indoors in even lighting</li>
+          <li>Sit comfortably with your back supported, legs uncrossed, and feet flat</li>
+          <li>Avoid wearing face makeup or sunscreen</li>
+          <li>Ensure your face, neck, and shoulders are clearly visible</li>
+          <li>Relax for 5 minutes before starting</li>
+          <li>Keep the background simple and still</li>
+        </ul>
+
+        <h3>During Measurement</h3>
+        <ul>
+          <li>Position your face in the on-screen guide before and during the scan.</li>
+          <li>Remain still and avoid talking, eating, or moving while the scan is in progress.</li>
+          <li>Follow on-screen coaching messages and quality alerts. <strong>Start Scan</strong> is disabled until
+            blocking quality issues (such as poor lighting or face position) are resolved.</li>
+          <li>Each measurement session includes up to <strong>three (3) scan attempts</strong>. Attempt labels such as
+            <strong>2/3</strong> appear on retries.</li>
+          <li>Between attempts you may tap <strong>Retry</strong> to scan again or <strong>Submit</strong> to save
+            readings you already have.</li>
+          <li>If pulse rate is below 40 or above 120 bpm, or breathing rate is below 8 or above 30 bpm, the app will
+            ask you to <strong>verify</strong> the reading by measuring again.</li>
+          <li>When all attempts are complete, review your results and tap <strong>Submit</strong> to send them to
+            your healthcare provider. Results are <strong>not</strong> sent until you tap Submit.</li>
+          <li>If nothing could be measured after all attempts, only <strong>Retry</strong> is offered until you tap
+            <strong>Start Scan</strong> to try a new session.</li>
+          <li>After your first successful submission in a visit, <strong>Start New Session</strong> lets you measure
+            again for the same patient.</li>
+        </ul>
+
+        <h3>After Submit</h3>
+        <ul>
+          <li>A success message confirms your vitals were captured.</li>
+          <li>Readings outside the normal range may show a warning banner. Tap <strong>Retry</strong> on the results
+            screen if you need to verify a boundary reading.</li>
+          <li>Tap <strong>Done</strong> to return home and measure again with the same Patient ID.</li>
+          <li>If submit fails, tap <strong>Try Submit Again</strong>. The app automatically retries on network
+            errors up to three times.</li>
+        </ul>
+
+        <h3>Troubleshooting Alerts</h3>
+        <p>If RoboVitals AI does not work on your device, contact your healthcare provider for an alternative method to
+          measure your vitals. Common on-screen alerts include:</p>
+        <ul>
+          <li><strong>Quality warnings:</strong> resolve lighting or positioning before <strong>Start Scan</strong>
+            becomes available</li>
+          <li><strong>Face not detected:</strong> center your face in the guide</li>
+          <li><strong>Unable to measure:</strong> tap <strong>Retry</strong> or <strong>Start Scan</strong> to try again
+          </li>
+          <li><strong>Submit failed:</strong> tap <strong>Try Submit Again</strong></li>
+        </ul>
+        <p>See Section 5 for additional messages and fixes.</p>
+      </section>
+
+      <section id="compatibility">
+        <h2>3. Devices and Operating Systems Compatibility</h2>
+        <h3>Device / Camera Requirements</h3>
+        <ul>
+          <li>Resolution: 640×480 pixels or higher</li>
+          <li>Frame rate: 20 fps minimum</li>
+          <li>RAM: 6.0 GB or more</li>
+        </ul>
+        <h3>Compatible Browsers</h3>
+        <table class="rv-table">
+          <thead>
+            <tr>
+              <th>Browser</th>
+              <th>Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Safari</td>
+              <td>16 or higher</td>
+            </tr>
+            <tr>
+              <td>Google Chrome</td>
+              <td>114 or higher</td>
+            </tr>
+            <tr>
+              <td>Microsoft Edge</td>
+              <td>123 or higher</td>
+            </tr>
+            <tr>
+              <td>Samsung Internet</td>
+              <td>27 or higher</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><strong>Note:</strong> Mozilla Firefox is not recommended.</p>
+        <h3>Supported Operating Systems</h3>
+        <table class="rv-table">
+          <thead>
+            <tr>
+              <th>Operating System</th>
+              <th>Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Android</td>
+              <td>12 or higher</td>
+            </tr>
+            <tr>
+              <td>iOS</td>
+              <td>18 or higher</td>
+            </tr>
+            <tr>
+              <td>iPadOS</td>
+              <td>17 or higher</td>
+            </tr>
+            <tr>
+              <td>macOS</td>
+              <td>13.7.3 (Ventura) or higher</td>
+            </tr>
+            <tr>
+              <td>Microsoft Windows</td>
+              <td>Windows 11 or higher</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>Some devices running these operating systems may not be compatible. If you have technical difficulties,
+          contact <a href="mailto:support@hellogard.com">support@hellogard.com</a>.</p>
+      </section>
+
+      <section id="cybersecurity">
+        <h2>4. Cybersecurity &amp; Privacy</h2>
+        <h3>Stay Secure</h3>
+        <ul>
+          <li>Only click links from your healthcare provider</li>
+          <li>Never enter personal information outside the official application link</li>
+          <li>Use private, secure Internet (avoid public Wi-Fi when possible)</li>
+          <li>Enable security features on your device (PIN, biometrics)</li>
+          <li>Keep your software and browser up to date</li>
+        </ul>
+        <h3>Your Data</h3>
+        <ul>
+          <li>Your health data is encrypted during transmission and is not stored long-term on your device.</li>
+          <li>Closing the browser ends your active session.</li>
+          <li>For new patients, the app collects Patient ID, email, name, date of birth, height, weight, and
+            temperature to create your record before vitals capture.</li>
+          <li>Pulse and respiratory rate measurements are sent to your healthcare provider only after you tap
+            <strong>Submit</strong>.</li>
+        </ul>
+      </section>
+
+      <section id="error-messages" class="rv-errors-section">
+        <h2>5. Error Messages &amp; On-Screen Guidance</h2>
+        <p class="rv-section-lead">Quick reference for messages you may see during patient lookup, scanning, or submit.</p>
+        <div class="rv-error-list">
+        <div class="rv-error-block">
+          <h3>Patient ID Required / Registration Incomplete</h3>
+          <p><strong>What it means:</strong> Patient ID is missing or required registration fields were not completed
+            for a new patient.</p>
+          <p><strong>Fix:</strong> Enter your Patient ID and all required fields (email, name, date of birth, height,
+            weight, temperature), then tap <strong>Capture Vitals</strong> again.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>AI Models Still Loading</h3>
+          <p><strong>What it means:</strong> The vitals engine has not finished loading.</p>
+          <p><strong>Fix:</strong> Wait for the loading progress to reach 100%, then tap <strong>Capture Vitals</strong>.
+            If loading fails, refresh the page or contact support.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Unable to Measure Vitals</h3>
+          <p><strong>What it means:</strong> Pulse rate, breathing rate, or both could not be measured during the
+            session.</p>
+          <p><strong>Fix:</strong> Tap <strong>Retry</strong> (up to three attempts per session). Improve lighting,
+            center your face in the guide, and hold still. If readings are outside the displayed range (pulse below 40
+            or above 120 bpm; breathing below 8 or above 30 bpm), verify by measuring again.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Verify Pulse or Breathing Rate</h3>
+          <p><strong>What it means:</strong> A reading is outside the measurable display range and needs
+            confirmation.</p>
+          <p><strong>Fix:</strong> Tap <strong>Retry</strong> during the session, or <strong>Retry</strong> on the
+            results screen after submit. You may tap <strong>Submit</strong> during a retry wait to save other vitals
+            you already have.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Face Not Detected / Face Outside Guide</h3>
+          <p><strong>What it means:</strong> Your face is not centered in the guide or is not visible to the camera.
+          </p>
+          <p><strong>Fix:</strong> Center your face in the frame, ensure good lighting, and tap <strong>Start
+              Scan</strong> again.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Quality Warnings (Lighting, Movement)</h3>
+          <p><strong>What it means:</strong> Conditions are not ideal for an accurate scan. <strong>Start Scan</strong>
+            stays disabled while a blocking warning is active.</p>
+          <p><strong>Fix:</strong> Adjust lighting, reduce movement, and wait for warnings to clear before starting a
+            scan.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Camera Access Denied</h3>
+          <p><strong>What it means:</strong> RoboVitals AI cannot use your device camera.</p>
+          <p><strong>Fix:</strong> Allow camera access in your browser or device settings for this site, then refresh
+            the page.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Lost Internet Connection</h3>
+          <p><strong>What it means:</strong> An Internet connection is required to load the application, authorize the
+            session, or submit results.</p>
+          <p><strong>Fix:</strong> Restore your connection and try again. If submit failed, tap <strong>Try Submit
+              Again</strong>.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Submit Failed / Try Submit Again</h3>
+          <p><strong>What it means:</strong> Results could not be saved to your healthcare provider.</p>
+          <p><strong>Fix:</strong> Tap <strong>Try Submit Again</strong> on the review screen. The app retries
+            automatically on network errors. If the problem continues, contact your healthcare provider or support.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Scan Session Ended</h3>
+          <p><strong>What it means:</strong> The measurement session ended before results could be completed (for
+            example, no remaining session attempts from the vitals engine).</p>
+          <p><strong>Fix:</strong> Tap <strong>Back</strong>, then tap <strong>Capture Vitals</strong> on the home
+            screen to start a new session.</p>
+        </div>
+        <div class="rv-error-block">
+          <h3>Vitals Engine Failed to Load</h3>
+          <p><strong>What it means:</strong> The browser could not load the AI measurement engine (for example,
+            WebAssembly unavailable or memory limits).</p>
+          <p><strong>Fix:</strong> Use a supported browser, close other apps, refresh the page, or try another
+            compatible device.</p>
+        </div>
+        </div>
+      </section>
+
+      <section id="support">
+        <h2>6. Customer Support and Contact Information</h2>
+        <p>If you encounter issues or have questions, contact your healthcare provider or email Hellogard support at
+          <a href="mailto:support@hellogard.com">support@hellogard.com</a>.</p>
+        <p class="rv-reference">
+          RoboVitals AI uses Informed Vital Core measurement technology. Reference eIFU:
+          <a href="https://mindsetmedical.com/eifu/ivc-user-manual" target="_blank" rel="noopener noreferrer">mindsetmedical.com/eifu/ivc-user-manual</a>
+        </p>
+      </section>
+    </main>
+
+    <footer class="rv-manual-footer">
+      <div class="rv-footer-logo-wrap">
+        <img src="/assets/images/robovitals-ai-logo.png" alt="" class="rv-footer-logo" height="auto" aria-hidden="true">
+      </div>
+    </footer>
+  </div>
+</body>
+
+</html>

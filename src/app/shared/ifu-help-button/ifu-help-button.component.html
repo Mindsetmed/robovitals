@@ -1,0 +1,10 @@
+<button
+  type="button"
+  class="hg-ifu-help-btn"
+  [class.hg-ifu-help-btn-dark]="variant === 'dark'"
+  [attr.aria-label]="label"
+  [title]="label"
+  (click)="openInstructions()">
+  <span class="hg-ifu-help-icon" aria-hidden="true">?</span>
+  <span class="hg-ifu-help-text">Help</span>
+</button>

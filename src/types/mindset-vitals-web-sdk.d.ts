@@ -3,7 +3,7 @@ declare module '@mindset-vitals/web-sdk' {
     init(): Promise<void>;
     destroy(): Promise<void>;
     startPreviewMode(video: HTMLVideoElement): Promise<void>;
-    authorize(): Promise<void>;
+    authorize(): Promise<{ authorizedVitals?: string[]; maxSessionTime?: number } | void>;
     start(vitals: string[], video: HTMLVideoElement): Promise<void>;
     stop(): Promise<unknown>;
     on(event: string, handler: (...args: unknown[]) => void): void;

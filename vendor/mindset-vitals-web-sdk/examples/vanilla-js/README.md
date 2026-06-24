@@ -233,6 +233,58 @@ npm start
 # Refresh browser to see updates
 ```
 
+# Example with Retries
+
+This example runs a single measurement session: you measure once and submit
+whatever the SDK returns. If a vital doesn't come back (poor lighting, movement,
+the session timing out before that vital is ready), there's no second attempt.
+
+For apps that need more than one try, there's a slightly more complex companion
+example, [`vanilla-js-retries`](../vanilla-js-retries), that adds **retries
+within the same session**. It's the same end-to-end flow as this example (same
+backend, same endpoints, same submission shape) with an app-level retry loop on
+top. The SDK itself still measures one session per `start()`/`stop()` and does
+not retry on its own; the loop lives in the example app.
+
+How it works:
+
+1. **Measure** the authorized vitals once.
+2. **Keep** any vital that came back. Readings accumulate across attempts in a
+   `collected` map, so a vital read on an earlier attempt is kept even if a later
+   attempt re-measures the others. (Example: RR comes back on attempt 1 and PR on
+   attempt 2 - the final result has both.)
+3. **If something is still missing**, the example does NOT auto-retry. It prompts
+   the user: the Start button becomes **Retry** and Stop becomes **Done**.
+   - **Retry** runs another attempt, re-measuring only the still-missing vitals.
+   - **Done** stops and submits what's been collected so far.
+4. **Stop early** once every wanted vital has a reading, or after `MAX_ATTEMPTS`
+   (default 3) is reached.
+5. **Submit once**, after the loop finishes - not on each attempt.
+
+Key points:
+
+- **One session = one PRO.** All attempts in a session aggregate into the *same*
+  `pro_submission`, submitted once. Retries do **not** create extra PROs.
+- **A new session is a new PRO.** After a result is submitted the Start button
+  reads **Start New Session**; clicking it creates a fresh PRO (via a
+  `POST /patient/new-pro` backend call) so it doesn't overwrite the previous one.
+- **The submitted payload is unchanged.** The loop returns the SDK result with the
+  aggregated readings merged in, keeping the same envelope (`webAppVersion`,
+  `frameCollectionMethod`, `timestamp`, etc.), so the same `POST /patient/vitals`
+  backend handles it without changes. `signsMsgs` is the most recent attempt that
+  logged signs messages; earlier attempts go in `prevSignsMsgs` (newest-first).
+
+Where to look in `vanilla-js-retries/public/app.js`:
+
+- `MAX_ATTEMPTS` - how many attempts to allow (a ceiling, not a target)
+- `gotReading(tag, value)` - whether a vital has a usable reading; tighten this to
+  clinical ranges if you want to reject and retry out-of-range readings
+- `measureOnce(vitals)` - runs one attempt, resolves on its `stop` event
+- `waitForRetry(...)` - the Retry/Done prompt between attempts
+- `measureWithRetries(wantedVitals)` - the retry/aggregate loop
+
+See the [`vanilla-js-retries` README](../vanilla-js-retries/README.md) for more.
+
 ## License
 
 UNLICENSED - For demonstration purposes only

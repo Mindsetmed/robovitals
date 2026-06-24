@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
@@ -13,21 +14,23 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { extractMindsetVitalsApiErrorMessage } from '../../mindset/mindset-vitals-http-errors';
+import { extractMindsetVitalsApiErrorMessage, isGatewayHttpStatus, isMissingProSubmissionCaptureError } from '../../mindset/mindset-vitals-http-errors';
 import { MindsetVitalsSdkRuntimeService } from '../../mindset/mindset-vitals-sdk-runtime.service';
 import { CaptureSessionService } from '../../mindset/capture-session.service';
-import { MindsetPatientRegistration, MindsetVitalsService } from '../../mindset/mindset-vitals.service';
+import { MindsetPatientRegistration, MindsetVitalsCaptureRequest, MindsetVitalsService } from '../../mindset/mindset-vitals.service';
 import {
   mapSdkStopResultToCaptureRequest,
-  mergeBpRetryIntoBaseResult,
-  mergePrRrRetryIntoBaseResult,
   MappedVitalsCaptureResult,
   VitalsCaptureScanState,
 } from '../../mindset/mindset-vitals-sdk.mapper';
 import {
   buildVitalResultRowsForCapture,
   hasUnmeasurableResults,
+  hasSubmittableResults,
   hasWarningResults,
+  needsRespiratoryRateVerification,
+  needsPulseRateVerification,
+  needsBoundaryQualifierVerification,
   vitalEmojiIcon,
   vitalTagsToCaptureCards,
   VITALS_RESULTS_BP_NOTE,
@@ -52,20 +55,15 @@ import {
   ScanOverlayLayout,
 } from './scan-progress-paths';
 import {
-  canOfferBpRetry,
-  canOfferPrRrRetry,
-  canShowResultsRetry,
-  getAuthorizedBpTags,
-  getAuthorizedPrRrTagsForRetry,
-  isBpAuthorized,
+  measureWithRetries,
   MINDSET_VITALS_MAX_ATTEMPTS,
-  resolveMeasurementVitals,
 } from '../../mindset/mindset-vitals-retry.helper';
+import { IfuHelpButtonComponent } from '../../shared/ifu-help-button/ifu-help-button.component';
 
 @Component({
   selector: 'app-vitals-capture',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IfuHelpButtonComponent],
   templateUrl: './vitals-capture.component.html',
   styleUrls: ['./vitals-capture.component.scss'],
   encapsulation: ViewEncapsulation.None,
@@ -92,6 +90,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   private maxSessionTime = 60;
   public showScanWarning = false;
   public isSubmitting = false;
+  private pendingCaptureMapped: MappedVitalsCaptureResult | null = null;
   public faceGuideStyle: Record<string, string> | null = null;
   public videoStageStyle: Record<string, string> | null = null;
   public cameraInfo: string | null = null;
@@ -117,15 +116,16 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   private scanFinalizeTimer: ReturnType<typeof setTimeout> | null = null;
   private measurementInFlight = false;
   private progressAnimatingToComplete = false;
-  private bpRetryUsed = false;
-  private bpRetryInProgress = false;
-  private bpRetryPending = false;
-  private prRrRetryUsed = false;
-  private prRrRetryInProgress = false;
-  private pendingPrRrRetryTags: string[] | null = null;
-  private prRrRetryAttemptNumber = 0;
+  private retryLoopActive = false;
+  public awaitingRetry = false;
+  public awaitingSessionReview = false;
+  public sessionReviewRows: VitalResultRow[] = [];
+  private retryAttemptNumber = 0;
+  private retryStillNeeded: string[] = [];
+  private waitForRetryResolver: ((wantsRetry: boolean) => void) | null = null;
+  private userChoseSubmitDuringWait = false;
+  private hasMeasuredOnce = false;
   private resultsMeasurementActive = false;
-  private previousScanEnvelope: Record<string, unknown> | null = null;
   private faceNotDetectedRestartTimer: ReturnType<typeof setTimeout> | null = null;
   private faceNotDetectedWarningMessage: string | null = null;
   private static readonly FACE_NOT_DETECTED_CODE = 'E-FDM-041';
@@ -134,11 +134,12 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
 
   private handlingMeasurementStop = false;
 
-  private readonly successMessage = 'Vitals submitted successfully';
+  private readonly successMessage = 'Your vitals were submitted successfully.';
   private readonly failureMessage = 'Vitals capture failed';
   private patientRegistered = false;
   private captureFlowStarted = false;
   private vitalsCaptureSubmitted = false;
+  public submitErrorMessage = '';
 
   constructor(
     private mindsetVitalsService: MindsetVitalsService,
@@ -164,6 +165,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.mindsetPatientAlreadyRegistered = session.mindsetPatientAlreadyRegistered;
     this.mindsetSdkRuntime.setPatientId(this.patientId);
     this.captureEpoch = this.mindsetSdkRuntime.startCaptureEpoch();
+    this.resetState();
   }
 
   ngAfterViewInit(): void {
@@ -221,12 +223,11 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   onBackClick = (): void => {
-    this.captureSession.clearActiveSession();
-    void this.router.navigate(['/']);
+    void this.exitCaptureFullReload();
   };
 
   onDoneClick = (): void => {
-    this.finishAndRestartSession();
+    void this.restartFromHomeKeepingPatientId();
   };
 
   public onBtnRetryClick = (): void => {
@@ -247,44 +248,193 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     );
   }
 
+  public get showVideoPreparingDim(): boolean {
+    return (
+      this.scanState === 'camera_permission_required' ||
+      (this.scanState === 'initializing_scan' && !this.mediaStream)
+    );
+  }
+
   public get showCaptureCards(): boolean {
-    return this.scanState === 'scanning_in_progress';
+    return this.scanState === 'scanning_in_progress' || this.showSessionReviewInCards;
+  }
+
+  public get showSessionReviewInCards(): boolean {
+    return (
+      (this.awaitingRetry || this.awaitingSessionReview) &&
+      this.scanState === 'ready_to_scan' &&
+      this.sessionReviewRows.length > 0
+    );
   }
 
   public get showStartScanButton(): boolean {
-    return this.scanState === 'ready_to_scan' || this.scanState === 'scan_failed';
+    return (
+      (this.scanState === 'ready_to_scan' || this.scanState === 'scan_failed') &&
+      !this.measurementInFlight &&
+      !this.scanFinalizing &&
+      !this.awaitingRetry &&
+      !this.awaitingSessionReview
+    );
   }
 
   public get startScanDisabled(): boolean {
     return (
       this.isSubmitting ||
+      this.measurementInFlight ||
+      this.scanFinalizing ||
       this.scanState === 'initializing_scan' ||
       this.scanState === 'scanning_in_progress' ||
       this.scanState === 'camera_permission_required' ||
-      (this.scanState === 'ready_to_scan' && this.activeQualityWarnings.length > 0)
+      this.hasBlockingScanWarnings
     );
+  }
+
+  public get hasBlockingScanWarnings(): boolean {
+    return this.scanState === 'ready_to_scan' && this.activeQualityWarnings.length > 0;
   }
 
   public get startScanHint(): string | null {
     return null;
   }
 
-  public get readyScanTitle(): string {
-    if (this.prRrRetryInProgress && this.prRrRetryAttemptNumber >= 2) {
-      return `Attempt ${this.prRrRetryAttemptNumber} of ${MINDSET_VITALS_MAX_ATTEMPTS}`;
+  public get readyScanTitle(): string | null {
+    if (this.isSubmitting) {
+      return null;
+    }
+    if (this.awaitingSessionReview) {
+      return null;
+    }
+    if (this.awaitingRetry && this.retryAttemptNumber > 1) {
+      return `Attempt ${this.retryAttemptNumber} of ${MINDSET_VITALS_MAX_ATTEMPTS}`;
     }
     return 'Ready to scan';
   }
 
   public get readyScanSubtitle(): string {
+    if (this.isSubmitting && !this.isResultsView) {
+      return 'Submitting vitals…';
+    }
+    if (this.submitErrorMessage) {
+      return `${this.submitErrorMessage} Tap Submit to try again.`;
+    }
+    if (this.awaitingRetry && this.retryStillNeeded.length) {
+      if (needsPulseRateVerification(this.sessionReviewRows)) {
+        return 'Your pulse rate needs to be verified. Tap Retry to measure again, or Submit to save what you have.';
+      }
+      if (needsRespiratoryRateVerification(this.sessionReviewRows)) {
+        return 'Your breathing rate needs to be verified. Tap Retry to measure again, or Submit to save what you have.';
+      }
+      if (!this.showMeasurementDecisionSubmit) {
+        return 'We could not measure your vitals. Tap Retry to try again.';
+      }
+      return 'Review your results above. Tap Retry to measure again, or Submit to save what you have.';
+    }
+    if (this.awaitingSessionReview) {
+      return 'Review your results above, and click Submit.';
+    }
+    if (this.statusMessage?.trim()) {
+      return this.statusMessage;
+    }
     return 'Center your face in the frame, then tap Start Scan.';
   }
 
+  public get showRetryDecisionFooter(): boolean {
+    return (
+      this.awaitingRetry &&
+      this.scanState === 'ready_to_scan' &&
+      !this.isSubmitting
+    );
+  }
+
+  public get showSessionReviewFooter(): boolean {
+    return (
+      this.awaitingSessionReview &&
+      this.scanState === 'ready_to_scan' &&
+      !this.isSubmitting
+    );
+  }
+
+  public sessionResultForCard(card: VitalCaptureCard): VitalResultRow | null {
+    const metricIdByCardKey: Record<string, string> = {
+      PR: 'pr',
+      RR: 'rr',
+      BP: 'bp',
+      SpO2: 'spo2',
+    };
+    const metricId = metricIdByCardKey[card.key];
+    if (!metricId) {
+      return null;
+    }
+    return this.sessionReviewRows.find((row) => row.id === metricId) ?? null;
+  }
+
+  public showCardSessionResult(card: VitalCaptureCard): boolean {
+    return this.showSessionReviewInCards && !!this.sessionResultForCard(card);
+  }
+
+  public cardSessionResultText(card: VitalCaptureCard): string {
+    const row = this.sessionResultForCard(card);
+    if (!row) {
+      return '';
+    }
+    if (row.kind === 'unmeasurable') {
+      return 'Unable to measure';
+    }
+    return this.rowDisplayValue(row);
+  }
+
+  public cardSessionResultKind(card: VitalCaptureCard): VitalResultRow['kind'] | null {
+    return this.sessionResultForCard(card)?.kind ?? null;
+  }
+
+  public rowDisplayValue(row: VitalResultRow): string {
+    if (row.kind === 'unmeasurable') {
+      return row.displayText ?? 'Unable to Measure';
+    }
+    if (row.displayText?.trim()) {
+      return row.displayText;
+    }
+    return [row.valuePrefix, row.valueNumber, row.valueUnit].filter(Boolean).join(' ').trim();
+  }
+
+  public onMeasurementSubmitClick = (): void => {
+    if (!this.showMeasurementDecisionSubmit) {
+      return;
+    }
+    if (this.awaitingRetry) {
+      this.onSubmitBetweenAttempts();
+      return;
+    }
+    if (this.awaitingSessionReview) {
+      this.onSubmitSessionReview();
+    }
+  };
+
   public get scanAttemptLabel(): string | null {
-    if (this.prRrRetryInProgress && this.scanState === 'scanning_in_progress' && this.prRrRetryAttemptNumber >= 2) {
-      return `Attempt ${this.prRrRetryAttemptNumber} of ${MINDSET_VITALS_MAX_ATTEMPTS}`;
+    if (
+      this.retryLoopActive &&
+      this.scanState === 'scanning_in_progress' &&
+      this.retryAttemptNumber > 1
+    ) {
+      return `Attempt ${this.retryAttemptNumber} of ${MINDSET_VITALS_MAX_ATTEMPTS}`;
     }
     return null;
+  }
+
+  public get showMeasurementDecisionRetry(): boolean {
+    return this.awaitingRetry && this.retryStillNeeded.length > 0;
+  }
+
+  public get showMeasurementDecisionSubmit(): boolean {
+    return hasSubmittableResults(this.sessionReviewRows);
+  }
+
+  public get showSessionReviewSubmit(): boolean {
+    return hasSubmittableResults(this.sessionReviewRows);
+  }
+
+  public get retryButtonDisabled(): boolean {
+    return this.hasBlockingScanWarnings;
   }
 
   public get coachingTip(): string | null {
@@ -392,6 +542,14 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     (row.id === 'bp' && this.authorizationFlags.bp) ||
     (row.id === 'spo2' && this.authorizationFlags.spo2);
 
+  public get showResultsDisclaimerGwIcon(): boolean {
+    if (!this.resultRows.length) {
+      return true;
+    }
+
+    return !this.resultRows.some((row) => !this.showVitalMarkBadge(row));
+  }
+
   public get showCoachingTip(): boolean {
     return !!this.coachingTip && (this.scanState === 'ready_to_scan' || this.scanState === 'scanning_in_progress');
   }
@@ -420,8 +578,9 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
 
   public get showFaceFrame(): boolean {
     return (
-      !this.isPreparingScan &&
-      (this.scanState === 'ready_to_scan' || this.scanState === 'scanning_in_progress')
+      this.scanState === 'ready_to_scan' ||
+      this.scanState === 'initializing_scan' ||
+      this.scanState === 'scanning_in_progress'
     );
   }
 
@@ -452,29 +611,49 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   public get showResultsSuccessBanner(): boolean {
     return (
       this.scanState === 'scan_completed' &&
-      !this.isSubmitting &&
-      !this.showResultsWarning &&
-      !this.showResultsUnmeasurable
+      this.vitalsCaptureSubmitted &&
+      !this.isSubmitting
     );
   }
 
-  public get showResultsIssueBanner(): boolean {
+  public get showResultsRangeWarningBanner(): boolean {
     return (
-      this.showResultsUnmeasurable ||
-      this.showResultsWarning ||
-      (this.scanState === 'scan_failed' && !this.isSubmitting)
+      this.scanState === 'scan_completed' &&
+      this.vitalsCaptureSubmitted &&
+      !this.isSubmitting &&
+      this.showResultsWarning
     );
   }
 
-  public get resultsBannerPrimary(): string {
-    if (this.showResultsUnmeasurable) {
-      return 'We were unable to measure one of your vitals at this time.';
-    }
-    if (this.showResultsWarning) {
-      return 'One or more vitals are outside the expected range. Please verify your results.';
-    }
-    return this.statusMessage || 'Unable to complete vitals capture at this time.';
+  public get showResultsSubmitError(): boolean {
+    return (
+      !!this.submitErrorMessage &&
+      !this.isSubmitting &&
+      this.resultRows.length > 0
+    );
   }
+
+  public get resultsRangeWarningMessage(): string {
+    if (needsBoundaryQualifierVerification(this.resultRows)) {
+      return 'One or more vitals are outside the measurable range. Tap Retry to verify your reading.';
+    }
+    return 'One or more vitals are outside the expected range. Please verify your results.';
+  }
+
+  public get showResultsBoundaryVerificationRetry(): boolean {
+    return (
+      this.scanState === 'scan_completed' &&
+      this.vitalsCaptureSubmitted &&
+      !this.isSubmitting &&
+      needsBoundaryQualifierVerification(this.resultRows)
+    );
+  }
+
+  public onResultsRemeasureClick = (): void => {
+    this.vitalsCaptureSubmitted = false;
+    this.returnToReadyScan('Tap Start Scan to verify your breathing rate.');
+    void this.reattachSdkForNewScan();
+  };
 
   public get showScanLineAnimation(): boolean {
     return (
@@ -484,7 +663,9 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   public get scanProgressSegments() {
-    return buildScanProgressSegments(this.progressPercent, this.showScanWarning);
+    const progress =
+      this.scanState === 'scanning_in_progress' ? this.progressPercent : 0;
+    return buildScanProgressSegments(progress, this.showScanWarning);
   }
 
   public get scanLineYValues(): string {
@@ -497,39 +678,50 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
 
   public trackCaptureCard = (_index: number, card: VitalCaptureCard): string => card.key;
 
-  public get showResultsRetry(): boolean {
-    return canShowResultsRetry({
-      scanFailed: this.scanState === 'scan_failed',
-      bp: {
-        authorizedTags: this.getSelectedVitals(),
-        bpRetryUsed: this.bpRetryUsed,
-        bpRetryInProgress: this.bpRetryInProgress,
-        bpResultKind: this.resultRows.find((row) => row.id === 'bp')?.kind,
-      },
-      prRr: {
-        authorizedTags: this.getSelectedVitals(),
-        prRrRetryUsed: this.prRrRetryUsed,
-        prRrRetryInProgress: this.prRrRetryInProgress,
-        bpRetryInProgress: this.bpRetryInProgress,
-        resultRows: this.resultRows,
-      },
-    });
-  }
-
-  public onResultsRetry = (): void => {
-    void this.retryFromResults();
-  };
-
   public get startScanButtonText(): string {
     if (this.scanState === 'scan_failed') {
       return 'Try Again';
     }
+    if (this.hasMeasuredOnce) {
+      return 'Start New Session';
+    }
     return 'Start Scan';
   }
+
+  public onRetryBetweenAttempts = (): void => {
+    this.resolveRetryPrompt(true);
+  };
+
+  public onSubmitBetweenAttempts = (): void => {
+    if (!this.showMeasurementDecisionSubmit) {
+      return;
+    }
+    this.userChoseSubmitDuringWait = true;
+    this.resolveRetryPrompt(false);
+  };
+
+  public onSubmitSessionReview = (): void => {
+    if (!this.pendingCaptureMapped || this.isSubmitting || !this.showSessionReviewSubmit) {
+      return;
+    }
+    void this.submitAndShowResults(this.pendingCaptureMapped);
+  };
+
+  public onDiscardSessionResultsAndRestart = (): void => {
+    if (this.isSubmitting) {
+      return;
+    }
+    this.returnToReadyScan();
+    const video = this.videoEl?.nativeElement;
+    if (video) {
+      void this.mindsetSdkRuntime.startPreview(video);
+    }
+  };
 
   private returnToReadyScan(message = '', preserveResults = false): void {
     if (!preserveResults) {
       this.resultRows = [];
+      this.pendingCaptureMapped = null;
     }
     this.scanState = 'ready_to_scan';
     this.statusMessage = message;
@@ -541,147 +733,195 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.showScanWarning = false;
     this.handlingMeasurementStop = false;
     this.measurementInFlight = false;
-    this.bpRetryInProgress = false;
-    this.bpRetryPending = false;
-    this.prRrRetryInProgress = false;
-    this.pendingPrRrRetryTags = null;
-    this.prRrRetryAttemptNumber = 0;
+    this.retryLoopActive = false;
+    this.awaitingRetry = false;
+    this.awaitingSessionReview = false;
+    this.sessionReviewRows = [];
+    this.userChoseSubmitDuringWait = false;
+    this.submitErrorMessage = '';
+    this.retryAttemptNumber = 0;
+    this.retryStillNeeded = [];
+    this.waitForRetryResolver = null;
     this.resultsMeasurementActive = false;
+    this.clearQualityWarnings();
+    this.faceNotDetectedWarningMessage = null;
     this.mindsetSdkRuntime.resetMeasurementState();
     this.cancelFaceNotDetectedRestart();
     this.refreshFaceGuideOverlay();
     this.cdr.markForCheck();
   }
 
-  private async retryFromResults(): Promise<void> {
-    if (this.isSubmitting) {
+  private resolveRetryPrompt(wantsRetry: boolean): void {
+    if (!this.awaitingRetry || !this.waitForRetryResolver) {
       return;
     }
 
-    if (this.canRetryBpOnly()) {
-      const bpTags = getAuthorizedBpTags(this.getSelectedVitals());
-      if (!bpTags.length) {
-        console.warn('[Vitals Retry] BP retry requested but no BP tags are authorized.');
-        return;
-      }
+    const resolve = this.waitForRetryResolver;
+    this.waitForRetryResolver = null;
+    this.awaitingRetry = false;
+    this.retryStillNeeded = [];
+    resolve(wantsRetry);
+    this.cdr.markForCheck();
+  }
 
-      this.bpRetryUsed = true;
-      this.bpRetryPending = true;
-      console.info('[Vitals Retry] User initiated BP unmeasurable retry. Authorized BP tags:', bpTags);
-
-      try {
-        await this.prepareRetryReadyScan();
-      } catch (error) {
-        console.error('BP vitals retry failed:', error);
-        this.bpRetryPending = false;
-        this.resultsMeasurementActive = false;
-        this.setFailedState(this.resolveErrorMessage(error), false, true);
-      }
-      return;
-    }
-
-    if (this.canRetryPrRrOnly()) {
-      const prRrTags = getAuthorizedPrRrTagsForRetry(this.getSelectedVitals(), this.resultRows);
-      if (!prRrTags.length) {
-        console.warn('[Vitals Retry] PR/RR retry requested but no eligible PR/RR tags found.');
-        return;
-      }
-
-      this.prRrRetryUsed = true;
-      this.prRrRetryInProgress = true;
-      this.pendingPrRrRetryTags = prRrTags;
-      this.prRrRetryAttemptNumber = 2;
-      console.info('[Vitals Retry] User initiated PR/RR retry. Tags:', prRrTags);
-
-      try {
-        await this.prepareRetryReadyScan();
-      } catch (error) {
-        console.error('PR/RR vitals retry failed:', error);
-        this.prRrRetryInProgress = false;
-        this.pendingPrRrRetryTags = null;
-        this.prRrRetryAttemptNumber = 0;
-        this.resultsMeasurementActive = false;
-        this.setFailedState(this.resolveErrorMessage(error), false, true);
-      }
-      return;
-    }
-
-    this.resultRows = [];
-    this.isSubmitting = false;
-    this.statusMessage = '';
-    this.progressPercent = 0;
-    this.scanSecondsRemaining = 0;
-    this.scanFinalizing = false;
-    this.progressAnimatingToComplete = false;
-    this.showScanWarning = false;
-    this.handlingMeasurementStop = false;
-    this.measurementInFlight = false;
-    this.clearQualityWarnings();
-    this.clearScanTimers();
-    this.cancelFaceNotDetectedRestart();
-    this.mindsetSdkRuntime.resetMeasurementState();
-
-    try {
-      this.scanState = 'initializing_scan';
-      this.cdr.detectChanges();
-      await this.waitForVideoElement();
-      await this.ensureCameraReadyForMeasurement();
+  private waitForRetryPrompt(
+    stillNeeded: string[],
+    attempt: number,
+    partialEnvelope: Record<string, unknown>,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.awaitingRetry = true;
+      this.awaitingSessionReview = false;
+      this.retryStillNeeded = stillNeeded;
+      this.retryAttemptNumber = attempt;
+      this.progressPercent = 0;
+      this.scanSecondsRemaining = 0;
+      this.scanFinalizing = false;
+      this.progressAnimatingToComplete = false;
       this.scanState = 'ready_to_scan';
+      this.statusMessage = '';
+      this.mindsetSdkRuntime.resetMeasurementState();
+      this.waitForRetryResolver = resolve;
+      this.updateSessionReviewFromSdkResult(partialEnvelope, stillNeeded);
+
+      const video = this.videoEl?.nativeElement;
+      if (video) {
+        void this.mindsetSdkRuntime.startPreview(video);
+      }
+
       this.refreshFaceGuideOverlay();
       this.cdr.markForCheck();
-    } catch (error) {
-      console.error('Vitals retry failed:', error);
-      this.setFailedState(this.resolveErrorMessage(error), false, true);
-    }
+    });
   }
 
-  private async prepareRetryReadyScan(): Promise<void> {
-    this.isSubmitting = false;
-    this.statusMessage = '';
-    this.clearQualityWarnings();
-    this.clearScanTimers();
-    this.cancelFaceNotDetectedRestart();
-    this.resultsMeasurementActive = true;
-    this.cdr.markForCheck();
-
-    this.scanState = 'initializing_scan';
-    this.cdr.detectChanges();
-    await this.waitForVideoElement();
-    if (!this.isCameraStreamActive()) {
-      await this.startCamera();
-    }
-    await this.recycleSdkForRetry();
-    this.scanState = 'ready_to_scan';
-    this.refreshFaceGuideOverlay();
-    this.cdr.markForCheck();
+  private updateSessionReviewFromSdkResult(
+    sdkResult: Record<string, unknown>,
+    stillNeeded: string[] = [],
+  ): void {
+    const vitalCoreVersion = this.mindsetSdkRuntime.getVitalCoreVersion();
+    const authorizedTags = this.getSelectedVitals();
+    let mapped = mapSdkStopResultToCaptureRequest(sdkResult, vitalCoreVersion, authorizedTags);
+    mapped = this.applyPendingVitalReadings(mapped, sdkResult, stillNeeded, authorizedTags);
+    this.pendingCaptureMapped = mapped;
+    this.sessionReviewRows = buildVitalResultRowsForCapture(mapped, this.captureCards);
   }
 
-  private returnToPrRrRetryReady(message = ''): void {
+  private applyPendingVitalReadings(
+    mapped: MappedVitalsCaptureResult,
+    sdkResult: Record<string, unknown>,
+    stillNeeded: string[],
+    authorizedTags: string[],
+  ): MappedVitalsCaptureResult {
+    const pending = sdkResult['pendingVitalReadings'];
+    if (!pending || typeof pending !== 'object' || stillNeeded.length === 0) {
+      return mapped;
+    }
+
+    const pendingReadings = pending as Record<string, Record<string, unknown>>;
+    const authorized = new Set(authorizedTags);
+    const next: MappedVitalsCaptureResult = { ...mapped };
+
+    if (stillNeeded.some((tag) => tag.startsWith('RR_'))) {
+      const rrReading =
+        (authorized.has('RR_MD') ? pendingReadings['RR_MD'] : undefined) ??
+        (authorized.has('RR_GW') ? pendingReadings['RR_GW'] : undefined);
+      const rr = this.readPositiveSdkNumber(rrReading?.['rr']);
+      if (rr != null) {
+        next.breathingRate = rr;
+      }
+    }
+
+    if (stillNeeded.some((tag) => tag.startsWith('PR_'))) {
+      const prReading =
+        (authorized.has('PR_MD') ? pendingReadings['PR_MD'] : undefined) ??
+        (authorized.has('PR_GW') ? pendingReadings['PR_GW'] : undefined);
+      const hr = this.readPositiveSdkNumber(prReading?.['hr']);
+      if (hr != null) {
+        next.pulseRate = hr;
+      }
+    }
+
+    return next;
+  }
+
+  private readPositiveSdkNumber(value: unknown): number | undefined {
+    if (value == null) {
+      return undefined;
+    }
+
+    const parsed = typeof value === 'number' ? value : parseFloat(String(value));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  private showSessionReviewBeforeSubmit(mapped: MappedVitalsCaptureResult): void {
+    this.pendingCaptureMapped = mapped;
+    this.sessionReviewRows = buildVitalResultRowsForCapture(mapped, this.captureCards);
+    this.awaitingSessionReview = true;
+    this.awaitingRetry = false;
     this.scanState = 'ready_to_scan';
-    this.statusMessage = message;
     this.progressPercent = 0;
     this.scanSecondsRemaining = 0;
-    this.scanFinalizing = false;
-    this.progressAnimatingToComplete = false;
-    this.isSubmitting = false;
-    this.showScanWarning = false;
-    this.handlingMeasurementStop = false;
-    this.measurementInFlight = false;
-    this.mindsetSdkRuntime.resetMeasurementState();
-    this.cancelFaceNotDetectedRestart();
-    this.refreshFaceGuideOverlay();
+    this.statusMessage = '';
 
     const video = this.videoEl?.nativeElement;
     if (video) {
       void this.mindsetSdkRuntime.startPreview(video);
     }
 
+    this.refreshFaceGuideOverlay();
     this.cdr.markForCheck();
   }
 
-  private finishAndRestartSession(): void {
+  private beginRetryAttempt(attempt: number, _maxAttempts: number, vitals: string[]): void {
+    this.retryAttemptNumber = attempt;
+    this.progressPercent = 0;
+    this.scanSecondsRemaining = 0;
+    this.scanFinalizing = false;
+    this.progressAnimatingToComplete = false;
+    this.showScanWarning = false;
+    this.clearScanTimers();
+    this.clearQualityWarnings();
+    this.cancelFaceNotDetectedRestart();
+    this.scanState = 'scanning_in_progress';
+    this.statusMessage = '';
+    this.refreshFaceGuideOverlay();
+    this.mindsetSdkRuntime.markMeasurementStarted();
+    console.info(`[Vitals Retry] Starting attempt ${attempt}/${MINDSET_VITALS_MAX_ATTEMPTS} with tags:`, vitals);
+    this.cdr.markForCheck();
+  }
+
+  private endRetryAttempt(): void {
+    this.scanFinalizing = false;
+    this.progressAnimatingToComplete = false;
+    this.mindsetSdkRuntime.resetMeasurementState();
+    this.cdr.markForCheck();
+  }
+
+  private async exitCapture(): Promise<void> {
+    await this.cleanup();
     this.captureSession.clearActiveSession();
-    void this.router.navigate(['/']);
+    await this.router.navigate(['/']);
+  }
+
+  private async restartFromHomeKeepingPatientId(): Promise<void> {
+    const session = {
+      patientId: this.patientId,
+      registration: this.patientRegistration,
+      mindsetPatientAlreadyRegistered: this.mindsetPatientAlreadyRegistered,
+    };
+
+    await this.cleanup();
+    this.captureSession.clearActiveSession();
+    this.captureSession.saveDoneRestartSnapshot(session);
+    await this.mindsetSdkRuntime.ensureCleanCaptureStart();
+    window.location.href = `/?v=${Date.now()}`;
+  }
+
+  private async exitCaptureFullReload(): Promise<void> {
+    await this.cleanup();
+    this.captureSession.clearAll();
+    await this.mindsetSdkRuntime.ensureCleanCaptureStart();
+    window.location.href = `/?v=${Date.now()}`;
   }
 
   private resetState(): void {
@@ -689,11 +929,16 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.progressAnimatingToComplete = false;
     this.handlingMeasurementStop = false;
     this.measurementInFlight = false;
-    this.bpRetryInProgress = false;
-    this.bpRetryPending = false;
-    this.prRrRetryInProgress = false;
-    this.pendingPrRrRetryTags = null;
-    this.prRrRetryAttemptNumber = 0;
+    this.retryLoopActive = false;
+    this.awaitingRetry = false;
+    this.awaitingSessionReview = false;
+    this.sessionReviewRows = [];
+    this.userChoseSubmitDuringWait = false;
+    this.submitErrorMessage = '';
+    this.retryAttemptNumber = 0;
+    this.retryStillNeeded = [];
+    this.waitForRetryResolver = null;
+    this.hasMeasuredOnce = false;
     this.scanState = 'initializing_scan';
     this.statusMessage = '';
     this.progressPercent = 0;
@@ -707,14 +952,10 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.clearQualityWarnings();
     this.captureCards = vitalTagsToCaptureCards([]);
     this.resultRows = [];
-    this.previousScanEnvelope = null;
-    this.bpRetryUsed = false;
-    this.prRrRetryUsed = false;
-    this.bpRetryPending = false;
-    this.pendingPrRrRetryTags = null;
-    this.prRrRetryAttemptNumber = 0;
+    this.pendingCaptureMapped = null;
     this.resultsMeasurementActive = false;
     this.vitalsCaptureSubmitted = false;
+    this.captureFlowStarted = false;
     this.clearFaceGuide();
     this.videoStageStyle = null;
     this.cancelFaceNotDetectedRestart();
@@ -888,23 +1129,6 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     await this.mindsetSdkRuntime.captureVitalCoreVersion();
   }
 
-  private async recycleSdkForRetry(): Promise<void> {
-    const video = this.videoEl?.nativeElement;
-    if (!video) {
-      throw new Error('Video element not available.');
-    }
-
-    console.info('[Vitals Retry] Recycling SDK client for fresh backend authorization.');
-    this.mindsetSdkRuntime.setPatientId(this.patientId);
-    this.vitalClient = await this.mindsetSdkRuntime.prepareForNewCapture();
-    this.authorizedVitals.clear();
-    this.authorizationFlags = { pr: false, rr: false, bp: false, spo2: false };
-    this.bindSdkSessionHandlers();
-    await this.mindsetSdkRuntime.startPreview(video);
-    this.vitalClient = this.mindsetSdkRuntime.getClient();
-    await this.mindsetSdkRuntime.captureVitalCoreVersion();
-  }
-
   private bindSdkSessionHandlers(): void {
     this.mindsetSdkRuntime.bindSession({
       onAuthorizedVitals: (vitals) => {
@@ -916,6 +1140,14 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
         }
       },
       onTimeLeft: (data) => {
+        if (
+          !this.retryLoopActive ||
+          this.scanState !== 'scanning_in_progress' ||
+          this.scanFinalizing
+        ) {
+          return;
+        }
+
         if (typeof data?.maxTime === 'number' && data.maxTime > 0) {
           this.maxSessionTime = data.maxTime;
         }
@@ -930,11 +1162,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
           nextProgress >= 100 ||
           (timeLeft != null && Number.isFinite(timeLeft) && timeLeft <= 0);
 
-        if (
-          this.scanState === 'scanning_in_progress' &&
-          !this.scanFinalizing &&
-          measurementComplete
-        ) {
+        if (measurementComplete) {
           this.scheduleFinalizeAtCompletion();
         }
         this.cdr.markForCheck();
@@ -985,49 +1213,34 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private async startScan(): Promise<void> {
-    if (this.startScanDisabled || !this.vitalClient) {
+    if (this.startScanDisabled || !this.vitalClient || this.awaitingRetry) {
       return;
     }
 
     try {
-      if (this.bpRetryPending) {
-        this.bpRetryPending = false;
-        this.bpRetryInProgress = true;
-        await this.runMeasurement({ bpRetryOnly: true });
-        return;
-      }
-
-      if (this.prRrRetryInProgress && this.pendingPrRrRetryTags?.length) {
-        console.info(
-          `[Vitals Retry] User started PR/RR retry attempt ${this.prRrRetryAttemptNumber}/${MINDSET_VITALS_MAX_ATTEMPTS}`,
-          this.pendingPrRrRetryTags,
-        );
-        await this.runMeasurement({ prRrRetryOnly: this.pendingPrRrRetryTags });
-        return;
-      }
-
-      await this.runMeasurement();
+      await this.runMeasurementSession();
     } catch (error) {
       console.error('Vitals scan failed:', error);
-      const message = this.resolveErrorMessage(error);
-      if (this.prRrRetryInProgress) {
-        this.returnToPrRrRetryReady(message);
-        return;
-      }
-      this.returnToReadyScan(message);
+      this.returnToReadyScan(this.resolveErrorMessage(error));
     }
   }
 
-  private async runMeasurement(options?: { bpRetryOnly?: boolean; prRrRetryOnly?: string[] }): Promise<void> {
-    if (!this.vitalClient) {
-      throw new Error('Vitals client not initialized.');
-    }
-
-    if (this.measurementInFlight) {
+  private async runMeasurementSession(): Promise<void> {
+    if (!this.vitalClient || this.measurementInFlight) {
       return;
     }
 
     this.measurementInFlight = true;
+    this.retryLoopActive = true;
+    this.progressPercent = 0;
+    this.scanSecondsRemaining = 0;
+    this.scanFinalizing = false;
+    this.progressAnimatingToComplete = false;
+    this.scanState = 'initializing_scan';
+    this.resultRows = [];
+    this.pendingCaptureMapped = null;
+    this.vitalsCaptureSubmitted = false;
+    this.cdr.markForCheck();
 
     try {
       await this.ensureCameraReadyForMeasurement();
@@ -1037,68 +1250,63 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
         throw new Error('Video element not available.');
       }
 
-      this.progressPercent = 0;
-      this.scanSecondsRemaining = 0;
-      this.scanFinalizing = false;
-      this.progressAnimatingToComplete = false;
-      this.showScanWarning = false;
-      this.clearScanTimers();
-      this.clearQualityWarnings();
-      this.cancelFaceNotDetectedRestart();
-      this.scanState = 'scanning_in_progress';
-      this.statusMessage = '';
-      this.refreshFaceGuideOverlay();
+      await this.authorizeAndSyncVitals();
 
-      let wantedVitals: string[];
-      try {
-        const authorizedTags = await this.authorizeAndSyncVitals();
-        wantedVitals = options?.bpRetryOnly
-          ? resolveMeasurementVitals(authorizedTags, { bpRetryOnly: true })
-          : options?.prRrRetryOnly?.length
-            ? resolveMeasurementVitals(authorizedTags, { prRrRetryOnly: options.prRrRetryOnly })
-            : authorizedTags;
-      } catch (error) {
-        console.error('Vitals authorization failed:', error);
-        this.returnToReadyScan();
-        return;
+      if (this.hasMeasuredOnce) {
+        await this.createNewProSubmissionOrThrow(this.patientId);
       }
 
-      if (wantedVitals.length === 0) {
-        console.error('No vitals authorized. Check authorization.');
-        this.returnToReadyScan();
-        return;
+      const wantedVitals = this.getSelectedVitals();
+      if (!wantedVitals.length) {
+        throw new Error('No vitals authorized. Check authorization.');
       }
 
-      if (options?.bpRetryOnly && !isBpAuthorized(this.getSelectedVitals())) {
-        console.error('[Vitals Retry] BP retry blocked — BP not in authorizedVitals set.');
-        this.returnToReadyScan();
-        return;
-      }
+      const sdkResult = await measureWithRetries(this.vitalClient, video, wantedVitals, {
+        maxAttempts: MINDSET_VITALS_MAX_ATTEMPTS,
+        onAttemptStarted: (attempt, maxAttempts, vitals) =>
+          this.beginRetryAttempt(attempt, maxAttempts, vitals),
+        waitForRetry: (stillNeeded, attempt, partialEnvelope) =>
+          this.waitForRetryPrompt(stillNeeded, attempt, partialEnvelope),
+        onAttemptComplete: () => this.endRetryAttempt(),
+      });
 
-      console.info(
-        options?.bpRetryOnly
-          ? '[Vitals Retry] Starting BP-only scan with authorized tags:'
-          : options?.prRrRetryOnly?.length
-            ? `[Vitals Retry] Starting PR/RR retry attempt ${this.prRrRetryAttemptNumber}/${MINDSET_VITALS_MAX_ATTEMPTS} with tags:`
-            : '[Vitals Auth] Starting measurement with authorized tags:',
+      const vitalCoreVersion = this.mindsetSdkRuntime.getVitalCoreVersion();
+      const mapped = mapSdkStopResultToCaptureRequest(
+        sdkResult,
+        vitalCoreVersion,
         wantedVitals,
       );
 
-      this.mindsetSdkRuntime.markMeasurementStarted();
-      await this.vitalClient.start(wantedVitals, video);
-    } catch (error) {
+      if (this.userChoseSubmitDuringWait) {
+        this.userChoseSubmitDuringWait = false;
+        const reviewRows = buildVitalResultRowsForCapture(mapped, this.captureCards);
+        if (!hasSubmittableResults(reviewRows)) {
+          this.resumeReadyScanAfterNoMeasurements(
+            'We could not measure your vitals. Tap Start Scan to try again.',
+          );
+        } else {
+          await this.submitAndShowResults(mapped);
+        }
+      } else {
+        const reviewRows = buildVitalResultRowsForCapture(mapped, this.captureCards);
+        if (!hasSubmittableResults(reviewRows)) {
+          this.resumeReadyScanAfterNoMeasurements(
+            'We could not measure your vitals. Tap Start Scan to try again.',
+          );
+        } else {
+          this.showSessionReviewBeforeSubmit(mapped);
+        }
+      }
+    } finally {
+      this.retryLoopActive = false;
+      this.awaitingRetry = false;
+      this.waitForRetryResolver = null;
       this.measurementInFlight = false;
-      this.bpRetryInProgress = false;
-      if (options?.bpRetryOnly) {
-        this.bpRetryPending = true;
+      if (!this.awaitingSessionReview) {
+        this.retryAttemptNumber = 0;
+        this.retryStillNeeded = [];
       }
-      console.error('Vitals measurement failed:', error);
-      const message = this.resolveErrorMessage(error);
-      if (this.prRrRetryInProgress) {
-        this.returnToPrRrRetryReady(message);
-        return;
-      }
-      this.returnToReadyScan(message);
+      this.cdr.markForCheck();
     }
   }
 
@@ -1118,26 +1326,6 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     return this.getSelectedVitals();
   }
 
-  private canRetryBpOnly(): boolean {
-    const bpRow = this.resultRows.find((row) => row.id === 'bp');
-    return canOfferBpRetry({
-      authorizedTags: this.getSelectedVitals(),
-      bpRetryUsed: this.bpRetryUsed,
-      bpRetryInProgress: this.bpRetryInProgress,
-      bpResultKind: bpRow?.kind,
-    });
-  }
-
-  private canRetryPrRrOnly(): boolean {
-    return canOfferPrRrRetry({
-      authorizedTags: this.getSelectedVitals(),
-      prRrRetryUsed: this.prRrRetryUsed,
-      prRrRetryInProgress: this.prRrRetryInProgress,
-      bpRetryInProgress: this.bpRetryInProgress,
-      resultRows: this.resultRows,
-    });
-  }
-
   private clearScanTimers(): void {
     if (this.scanFinalizeTimer) {
       clearTimeout(this.scanFinalizeTimer);
@@ -1146,7 +1334,12 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private scheduleFinalizeAtCompletion(): void {
-    if (this.scanFinalizeTimer || this.scanFinalizing || this.scanState !== 'scanning_in_progress') {
+    if (
+      !this.retryLoopActive ||
+      this.scanFinalizeTimer ||
+      this.scanFinalizing ||
+      this.scanState !== 'scanning_in_progress'
+    ) {
       return;
     }
 
@@ -1182,11 +1375,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
       console.error('Vitals finalize failed:', error);
       const message =
         this.resolveSdkErrorMessage(error) || 'Unable to finalize vitals scan. Please try again.';
-      if (this.prRrRetryInProgress) {
-        this.returnToPrRrRetryReady(message);
-      } else {
-        this.returnToReadyScan(message);
-      }
+      this.returnToReadyScan(message);
     } finally {
       this.scanFinalizing = false;
       this.progressAnimatingToComplete = false;
@@ -1226,6 +1415,13 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private async handleMeasurementStop(data: unknown): Promise<void> {
+    if (this.retryLoopActive) {
+      if (this.faceNotDetectedRestarting) {
+        this.faceNotDetectedRestarting = false;
+      }
+      return;
+    }
+
     if (
       this.handlingMeasurementStop ||
       this.destroyPending ||
@@ -1248,7 +1444,7 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
       this.measurementInFlight = false;
       this.mindsetSdkRuntime.resetMeasurementState();
       this.cancelFaceNotDetectedRestart();
-      this.returnToReadyScan();
+      this.returnToReadyScan('Face not detected. Center your face in the frame, then tap Start Scan.');
       this.handlingMeasurementStop = false;
       return;
     }
@@ -1263,16 +1459,8 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
 
     try {
       const result = this.resolveStopResult(data);
-      if (result) {
-        await this.handleScanComplete(result);
-        return;
-      }
-
-      const failureMessage = 'We could not complete the scan. Please try again.';
-      if (this.prRrRetryInProgress) {
-        this.returnToPrRrRetryReady(failureMessage);
-      } else {
-        this.returnToReadyScan(failureMessage);
+      if (!result) {
+        this.returnToReadyScan('We could not complete the scan. Please try again.');
       }
     } finally {
       this.handlingMeasurementStop = false;
@@ -1313,131 +1501,135 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     return Math.min(100, Math.max(0, Math.round(normalized)));
   }
 
-  private async handleScanComplete(sdkResult: unknown): Promise<void> {
-    let resolvedResult = sdkResult;
-    const completingBpRetry = this.bpRetryInProgress;
-    const completingPrRrRetry = this.prRrRetryInProgress;
-
-    if (completingBpRetry && this.previousScanEnvelope) {
-      resolvedResult = mergeBpRetryIntoBaseResult(this.previousScanEnvelope, sdkResult);
-      this.bpRetryInProgress = false;
-      console.info('[Vitals Retry] Merged BP retry into prior scan result.');
-    } else if (completingPrRrRetry && this.previousScanEnvelope) {
-      resolvedResult = mergePrRrRetryIntoBaseResult(this.previousScanEnvelope, sdkResult);
-      this.previousScanEnvelope = resolvedResult as Record<string, unknown>;
-      console.info(
-        `[Vitals Retry] Merged PR/RR attempt ${this.prRrRetryAttemptNumber}/${MINDSET_VITALS_MAX_ATTEMPTS} into prior scan result.`,
-      );
-    } else if (!completingBpRetry && !completingPrRrRetry) {
-      this.previousScanEnvelope = (sdkResult ?? {}) as Record<string, unknown>;
-    }
-
-    const vitalCoreVersion = this.mindsetSdkRuntime.getVitalCoreVersion();
-    const authorizedTags = this.getSelectedVitals();
-    const mapped = mapSdkStopResultToCaptureRequest(resolvedResult, vitalCoreVersion, authorizedTags);
-    this.resultRows = buildVitalResultRowsForCapture(mapped, this.captureCards);
-
-    if (completingPrRrRetry) {
-      const stillNeeded = getAuthorizedPrRrTagsForRetry(authorizedTags, this.resultRows);
-      const hasAttemptsLeft = this.prRrRetryAttemptNumber < MINDSET_VITALS_MAX_ATTEMPTS;
-
-      if (stillNeeded.length > 0 && hasAttemptsLeft) {
-        this.pendingPrRrRetryTags = stillNeeded;
-        this.prRrRetryAttemptNumber += 1;
-        console.info(
-          `[Vitals Retry] Preparing attempt ${this.prRrRetryAttemptNumber}/${MINDSET_VITALS_MAX_ATTEMPTS}. Tags still needed:`,
-          stillNeeded,
-        );
-        this.returnToPrRrRetryReady();
-        return;
-      }
-
-      this.prRrRetryInProgress = false;
-      this.pendingPrRrRetryTags = null;
-      console.info('[Vitals Retry] PR/RR retry sequence complete.');
-    }
-
-    const isRetryCompletion = completingBpRetry || completingPrRrRetry;
-
-    if (!mapped.isValid) {
-      if (isRetryCompletion || this.vitalsCaptureSubmitted) {
-        this.finishRetryResultsDisplay();
-        return;
-      }
-      this.finishCaptureWithoutSubmit(mapped);
-      return;
-    }
-
-    this.submitCaptureResults(mapped, authorizedTags, isRetryCompletion);
-  }
-
-  private submitCaptureResults(
-    mapped: MappedVitalsCaptureResult,
-    authorizedTags: string[],
-    isRetryCompletion: boolean,
-  ): void {
-    const submitMapped = filterMappedCaptureRequestForAuthorizedTags(mapped, authorizedTags);
-
+  private async submitAndShowResults(mapped: MappedVitalsCaptureResult): Promise<void> {
+    this.pendingCaptureMapped = mapped;
     this.isSubmitting = true;
+    this.submitErrorMessage = '';
+    this.statusMessage = 'Submitting vitals…';
+
+    const previewRows = buildVitalResultRowsForCapture(mapped, this.captureCards);
+    this.resultRows = previewRows;
+    this.awaitingSessionReview = false;
+    this.sessionReviewRows = [];
+    this.scanState = 'scan_completed';
+    this.vitalsCaptureSubmitted = false;
+    void this.stopCameraPreview();
     this.cdr.markForCheck();
 
-    this.mindsetVitalsService
-      .captureVitals(this.patientId, {
+    const authorizedTags = this.getSelectedVitals();
+    const submitMapped = filterMappedCaptureRequestForAuthorizedTags(mapped, authorizedTags);
+
+    try {
+      await this.captureVitalsWithRetry(this.patientId, {
         pulseRate: submitMapped.pulseRate,
         breathingRate: submitMapped.breathingRate,
         bloodPressureSystolic: submitMapped.bloodPressureSystolic,
         bloodPressureDiastolic: submitMapped.bloodPressureDiastolic,
         oxygenSaturation: submitMapped.oxygenSaturation,
         sdkVitalsPayload: mapped.sdkVitalsPayload,
-      })
-      .subscribe({
-        next: () => {
-          this.vitalsCaptureSubmitted = true;
-          this.finishCaptureSuccess();
-        },
-        error: (err) => {
-          const apiMessage = extractMindsetVitalsApiErrorMessage(err) || this.failureMessage;
-          console.error('[Vitals Capture] Submit failed:', apiMessage, err);
-          this.isSubmitting = false;
-
-          if (isRetryCompletion || this.vitalsCaptureSubmitted) {
-            console.warn('[Vitals Retry] Showing merged results after submit failure.');
-            this.finishRetryResultsDisplay();
-            return;
-          }
-
-          this.scanState = 'scan_failed';
-          this.statusMessage = apiMessage;
-          this.cdr.markForCheck();
-        },
+        clientUserAgent: this.resolveClientUserAgent(),
       });
+
+      this.vitalsCaptureSubmitted = true;
+      this.statusMessage = this.successMessage;
+      this.hasMeasuredOnce = true;
+      await this.mindsetSdkRuntime.releaseAfterCapture(this.captureEpoch);
+      this.vitalClient = null;
+    } catch (err) {
+      const apiMessage = extractMindsetVitalsApiErrorMessage(err) || this.failureMessage;
+      console.error('[Vitals Capture] Submit failed:', apiMessage, err);
+      if (!hasSubmittableResults(previewRows)) {
+        this.resumeReadyScanAfterNoMeasurements(apiMessage);
+      } else {
+        this.submitErrorMessage = apiMessage;
+        this.statusMessage = apiMessage;
+        this.vitalsCaptureSubmitted = false;
+      }
+    } finally {
+      this.isSubmitting = false;
+      this.resultsMeasurementActive = false;
+      this.cdr.markForCheck();
+    }
   }
 
-  private finishRetryResultsDisplay(): void {
-    void this.stopCameraPreview();
-    this.scanState = 'scan_completed';
-    this.resultsMeasurementActive = false;
-    this.statusMessage = this.vitalsCaptureSubmitted ? this.successMessage : '';
-    this.isSubmitting = false;
+  private resumeReadyScanAfterNoMeasurements(message: string): void {
+    this.returnToReadyScan(message);
+    const video = this.videoEl?.nativeElement;
+    if (video) {
+      void this.mindsetSdkRuntime.startPreview(video);
+    }
     this.cdr.markForCheck();
   }
 
-  private finishCaptureWithoutSubmit(mapped: MappedVitalsCaptureResult): void {
-    void this.stopCameraPreview();
-    this.scanState = 'scan_completed';
-    this.resultsMeasurementActive = false;
-    this.statusMessage = mapped.validationMessage || '';
-    this.isSubmitting = false;
-    this.cdr.markForCheck();
+  private async reattachSdkForNewScan(): Promise<void> {
+    try {
+      await this.attachSharedSdk();
+      this.refreshFaceGuideOverlay();
+      this.cdr.markForCheck();
+    } catch (error) {
+      console.error('Failed to reinitialize vitals scanner:', error);
+      this.setFailedState(this.resolveErrorMessage(error));
+    }
   }
 
-  private finishCaptureSuccess(): void {
-    void this.stopCameraPreview();
-    this.scanState = 'scan_completed';
-    this.resultsMeasurementActive = false;
-    this.statusMessage = this.successMessage;
-    this.isSubmitting = false;
-    this.cdr.markForCheck();
+  private resolveClientUserAgent(): string | undefined {
+    if (typeof navigator === 'undefined') {
+      return undefined;
+    }
+
+    const agent = navigator.userAgent?.trim();
+    return agent || undefined;
+  }
+
+  private async captureVitalsWithRetry(
+    patientId: string,
+    request: MindsetVitalsCaptureRequest,
+    maxAttempts = 3,
+  ): Promise<void> {
+    let lastError: unknown;
+    let proRecoveryAttempted = false;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await firstValueFrom(this.mindsetVitalsService.captureVitals(patientId, request));
+        return;
+      } catch (err) {
+        lastError = err;
+
+        if (!proRecoveryAttempted && isMissingProSubmissionCaptureError(err)) {
+          proRecoveryAttempted = true;
+          await this.createNewProSubmissionOrThrow(patientId);
+          continue;
+        }
+
+        const canRetry = attempt < maxAttempts && this.isRetriableCaptureError(err);
+        if (!canRetry) {
+          throw err;
+        }
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async createNewProSubmissionOrThrow(patientId: string): Promise<void> {
+    const newPro = await firstValueFrom(this.mindsetVitalsService.createNewProSubmission(patientId));
+    if (!newPro?.success) {
+      throw new Error(newPro?.message || 'Failed to create a new PRO submission for this session.');
+    }
+  }
+
+  private isRetriableCaptureError(error: unknown): boolean {
+    if (!(error instanceof HttpErrorResponse)) {
+      return true;
+    }
+
+    if (error.status === 0) {
+      return true;
+    }
+
+    return isGatewayHttpStatus(error.status);
   }
 
   private resolveErrorMessage(error: unknown): string {
@@ -1644,13 +1836,15 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.faceNotDetectedRestarting = true;
     this.cancelFaceNotDetectedRestart();
     this.clearScanTimers();
+    this.clearQualityWarnings();
+    this.faceNotDetectedWarningMessage = null;
 
     try {
       await this.mindsetSdkRuntime.stopMeasurement();
     } catch (error) {
       console.error('Face not detected scan restart failed:', error);
       this.faceNotDetectedRestarting = false;
-      this.returnToReadyScan();
+      this.returnToReadyScan('Face not detected. Center your face in the frame, then tap Start Scan.');
     }
   }
 
@@ -1743,6 +1937,9 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
 
+    this.resultsMeasurementActive = false;
+    this.clearQualityWarnings();
+    this.faceNotDetectedWarningMessage = null;
     void this.stopCameraPreview();
     this.scanState = 'scan_failed';
     if (!keepResults) {
@@ -1800,10 +1997,11 @@ export class VitalsCaptureComponent implements OnInit, AfterViewInit, OnDestroy 
     this.detachVideoLayoutObserver();
     this.clearFaceGuide();
     this.clearQualityWarnings();
+    this.faceNotDetectedWarningMessage = null;
     this.clearScanTimers();
     this.cancelFaceNotDetectedRestart();
 
-    await this.mindsetSdkRuntime.releaseAfterCapture(this.captureEpoch);
+    await this.mindsetSdkRuntime.forceReleaseClient();
     this.vitalClient = null;
 
     if (this.mediaStream) {

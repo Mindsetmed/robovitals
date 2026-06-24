@@ -16,11 +16,12 @@ import {
   isMindsetVitalsServiceUnavailableMessage,
   normalizePatientLookupMessage,
 } from '../../mindset/mindset-vitals-http-errors';
+import { IfuHelpButtonComponent } from '../../shared/ifu-help-button/ifu-help-button.component';
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, IfuHelpButtonComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss'],
   encapsulation: ViewEncapsulation.None,
@@ -78,7 +79,7 @@ export class HomeComponent implements OnInit, OnDestroy {
       }
     }
     this.initPatientIdLookup();
-    this.restorePersistedHomeSession();
+    this.restoreHomeSessionAfterReload();
     this.form.controls.patientId.valueChanges.pipe(takeUntil(this.destroy$)).subscribe(() => {
       this.onPatientIdChanged();
     });
@@ -221,15 +222,28 @@ export class HomeComponent implements OnInit, OnDestroy {
       mindsetPatientAlreadyRegistered,
     });
 
+    const startCapture = async (): Promise<void> => {
+      try {
+        await this.mindsetSdkRuntime.ensureCleanCaptureStart();
+        await this.router.navigate(['/capture']);
+      } catch {
+        this.captureSession.clearActiveSession();
+        this.setAlert(
+          'danger',
+          'Failed to prepare vitals scanner. Please wait for models to finish loading and retry.',
+        );
+      }
+    };
+
     if (this.mindsetSdkRuntime.isWarmupReady()) {
-      void this.router.navigate(['/capture']);
+      void startCapture();
       return;
     }
 
     this.isProcessing = true;
     void this.mindsetSdkRuntime
       .warmUp()
-      .then(() => this.router.navigate(['/capture']))
+      .then(() => startCapture())
       .catch(() => {
         this.captureSession.clearActiveSession();
         this.setAlert('danger', 'Failed to prepare vitals scanner. Please wait for models to finish loading and retry.');
@@ -384,16 +398,28 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.alertMessage = message;
   }
 
-  private restorePersistedHomeSession(): void {
-    const persisted = this.captureSession.getPersistedHomeSession();
-    if (!persisted?.patientId) {
+  private restoreHomeSessionAfterReload(): void {
+    const fromDoneRestart = this.captureSession.consumeDoneRestartSnapshot();
+    if (fromDoneRestart?.patientId) {
+      this.captureSession.setSession(fromDoneRestart);
+      this.mindsetSdkRuntime.setPatientId(fromDoneRestart.patientId);
+      this.applyHomeSession(fromDoneRestart);
+      this.patientIdLookup$.next(fromDoneRestart.patientId);
       return;
     }
 
-    const registration = persisted.registration;
+    this.restorePersistedHomeSession();
+  }
+
+  private applyHomeSession(session: {
+    patientId: string;
+    registration: MindsetPatientRegistration | null;
+    mindsetPatientAlreadyRegistered: boolean;
+  }): void {
+    const registration = session.registration;
     this.form.patchValue(
       {
-        patientId: persisted.patientId,
+        patientId: session.patientId,
         email: registration?.email ?? '',
         firstName: registration?.firstName ?? '',
         lastName: registration?.lastName ?? '',
@@ -405,12 +431,21 @@ export class HomeComponent implements OnInit, OnDestroy {
       { emitEvent: false },
     );
 
-    this.lastLookedUpPatientId = persisted.patientId;
-    this.patientFoundInMindset = persisted.mindsetPatientAlreadyRegistered;
+    this.lastLookedUpPatientId = session.patientId;
+    this.patientFoundInMindset = session.mindsetPatientAlreadyRegistered;
 
     if (this.patientFoundInMindset) {
       this.setAlert('success', 'Patient found. You can capture vitals.');
     }
+  }
+
+  private restorePersistedHomeSession(): void {
+    const persisted = this.captureSession.getPersistedHomeSession();
+    if (!persisted?.patientId) {
+      return;
+    }
+
+    this.applyHomeSession(persisted);
   }
 
 }

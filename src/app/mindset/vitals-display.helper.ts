@@ -65,7 +65,9 @@ export const BP_RESULT_DETAIL: VitalBpResultDetail = {
   ],
 };
 
-const PR_RANGE = { min: 60, max: 100 };
+const PR_NORMAL_RANGE = { min: 60, max: 100 };
+const PR_BOUNDARY_LOW = 40;
+const PR_BOUNDARY_HIGH = 120;
 const RR_NORMAL_RANGE = { min: 12, max: 22 };
 const RR_REPORTABLE_MIN = 9;
 const RR_REPORTABLE_MAX = 29;
@@ -175,6 +177,38 @@ function unmeasurableRow(metricId: string): VitalResultRow {
   });
 }
 
+function formatPulseRateValue(
+  value: number,
+): Pick<VitalResultRow, 'kind' | 'valuePrefix' | 'valueNumber' | 'valueUnit'> {
+  const rounded = Math.round(value);
+
+  if (rounded < PR_BOUNDARY_LOW) {
+    return {
+      kind: 'out_of_range',
+      valuePrefix: 'less than',
+      valueNumber: String(PR_BOUNDARY_LOW),
+      valueUnit: 'bpm',
+    };
+  }
+
+  if (rounded > PR_BOUNDARY_HIGH) {
+    return {
+      kind: 'out_of_range',
+      valuePrefix: 'greater than',
+      valueNumber: String(PR_BOUNDARY_HIGH),
+      valueUnit: 'bpm',
+    };
+  }
+
+  return {
+    kind: rangeStatus(rounded, PR_NORMAL_RANGE.min, PR_NORMAL_RANGE.max)
+      ? 'measured'
+      : 'out_of_range',
+    valueNumber: String(rounded),
+    valueUnit: 'bpm',
+  };
+}
+
 function formatRespiratoryRateValue(
   value: number,
 ): Pick<VitalResultRow, 'kind' | 'valuePrefix' | 'valueNumber' | 'valueUnit'> {
@@ -247,7 +281,7 @@ export function buildVitalResultRows(mapped: MappedVitalsCaptureResult): VitalRe
 
   if (mapped.pulseRate != null) {
     const def = METRIC_DEFS['pr'];
-    const value = formatMeasuredValue(mapped.pulseRate, 'bpm', PR_RANGE.min, PR_RANGE.max);
+    const value = formatPulseRateValue(mapped.pulseRate);
     rows.push({ id: 'pr', title: def.title, ...value, normalRange: def.normalRange, description: def.description });
   }
 
@@ -308,4 +342,35 @@ export function hasWarningResults(rows: VitalResultRow[]): boolean {
 
 export function hasUnmeasurableResults(rows: VitalResultRow[]): boolean {
   return rows.some((r) => r.kind === 'unmeasurable');
+}
+
+export function hasSubmittableResults(rows: VitalResultRow[]): boolean {
+  return rows.some((r) => r.kind !== 'unmeasurable');
+}
+
+export function needsBoundaryQualifierVerification(rows: VitalResultRow[]): boolean {
+  return rows.some(
+    (row) =>
+      (row.id === 'pr' || row.id === 'rr') &&
+      row.kind === 'out_of_range' &&
+      (row.valuePrefix === 'less than' || row.valuePrefix === 'greater than'),
+  );
+}
+
+export function needsRespiratoryRateVerification(rows: VitalResultRow[]): boolean {
+  const rr = rows.find((row) => row.id === 'rr');
+  if (!rr || rr.kind !== 'out_of_range') {
+    return false;
+  }
+
+  return rr.valuePrefix === 'less than' || rr.valuePrefix === 'greater than';
+}
+
+export function needsPulseRateVerification(rows: VitalResultRow[]): boolean {
+  const pr = rows.find((row) => row.id === 'pr');
+  if (!pr || pr.kind !== 'out_of_range') {
+    return false;
+  }
+
+  return pr.valuePrefix === 'less than' || pr.valuePrefix === 'greater than';
 }

@@ -1,5 +1,9 @@
 <div class="hg-landing">
   <div class="hg-landing-inner">
+    <div class="hg-landing-topbar">
+      <app-ifu-help-button />
+    </div>
+
     @if (alertMessage) {
     <div class="hg-alert hg-alert-{{ alertType }}" role="alert">{{ alertMessage }}</div>
     }

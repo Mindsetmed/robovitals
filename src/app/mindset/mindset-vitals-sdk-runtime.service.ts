@@ -280,17 +280,7 @@ export class MindsetVitalsSdkRuntimeService {
   }
 
   async recycleClient(): Promise<MindsetVitalClient> {
-    await this.endCaptureSession();
-
-    if (this.vitalClient) {
-      try {
-        await this.vitalClient.destroy();
-      } catch {}
-      this.vitalClient = null;
-    }
-
-    this.vitalCoreVersion = null;
-    this.clientCreationPromise = null;
+    await this.forceReleaseClient();
     await this.ensureClientInitialized();
 
     if (!this.vitalClient) {
@@ -300,11 +290,7 @@ export class MindsetVitalsSdkRuntimeService {
     return this.vitalClient;
   }
 
-  async releaseAfterCapture(captureEpoch: number): Promise<void> {
-    if (captureEpoch !== this.captureEpoch) {
-      return;
-    }
-
+  async forceReleaseClient(): Promise<void> {
     await this.endCaptureSession();
 
     if (this.vitalClient) {
@@ -315,10 +301,22 @@ export class MindsetVitalsSdkRuntimeService {
     }
 
     this.clientCreationPromise = null;
-    this.currentPatientId = '';
     this.vitalCoreVersion = null;
     this.previewActive = false;
     this.measuringActive = false;
+  }
+
+  async ensureCleanCaptureStart(): Promise<void> {
+    await this.forceReleaseClient();
+  }
+
+  async releaseAfterCapture(captureEpoch: number): Promise<void> {
+    if (captureEpoch !== this.captureEpoch) {
+      return;
+    }
+
+    await this.forceReleaseClient();
+    this.currentPatientId = '';
   }
 
   async destroy(): Promise<void> {

@@ -2,29 +2,25 @@
     <header class="hg-vitals-page-header">
         <button type="button" class="hg-vitals-btn-back" [disabled]="isSubmitting" (click)="onBackClick()">Back</button>
         <h1 class="hg-vitals-page-title">Health Insights</h1>
-        <button type="button" class="hg-vitals-btn-done" *ngIf="scanState === 'scan_completed'"
-            [disabled]="isSubmitting" (click)="onDoneClick()">Done</button>
-        <span *ngIf="scanState !== 'scan_completed'"></span>
+        <div class="hg-vitals-page-header-actions">
+            <app-ifu-help-button variant="dark" />
+            <button type="button" class="hg-vitals-btn-done" *ngIf="scanState === 'scan_completed'"
+                [disabled]="isSubmitting" (click)="onDoneClick()">Done</button>
+        </div>
     </header>
 
     <div class="hg-vitals-body" [class.hg-vitals-body-results]="isResultsView">
         <section class="hg-vitals-results" *ngIf="isResultsView; else scanView">
             <ng-container *ngIf="resultRows.length; else resultsErrorOnly">
-                <div class="alert alert-info hg-vitals-submit-alert" role="status" *ngIf="isSubmitting">
-                    <div class="hg-vitals-submit-alert-inner">
-                        <span class="hg-vitals-submit-alert-spinner" aria-hidden="true"></span>
-                        <div class="hg-vitals-submit-alert-copy">
-                            <strong class="hg-vitals-submit-alert-title">Submitting vitals</strong>
-                            <span class="hg-vitals-submit-alert-text">Please wait while we save your results.</span>
-                        </div>
+                <div class="hg-vitals-results-main">
+                    <div class="hg-vitals-results-actions" *ngIf="showResultsBoundaryVerificationRetry">
+                        <button type="button" class="hg-vitals-btn-retry hg-vitals-btn-submit-only"
+                            [disabled]="isSubmitting" (click)="onResultsRemeasureClick()">
+                            RETRY
+                        </button>
                     </div>
-                </div>
 
-                <div class="hg-vitals-results-banner hg-vitals-results-banner-success" *ngIf="showResultsSuccessBanner">
-                    <p>Your vitals were captured successfully.</p>
-                </div>
-
-                <div class="hg-vitals-results-grid" role="list">
+                    <div class="hg-vitals-results-grid" role="list">
                     <article class="hg-vitals-metric" role="listitem" *ngFor="let row of resultRows">
                         <div class="hg-vitals-metric-head">
                             <span class="hg-vitals-metric-icon" aria-hidden="true">{{ vitalEmoji(row.id) }}</span>
@@ -107,7 +103,7 @@
                 </div>
 
                 <aside class="hg-vitals-results-disclaimer" aria-label="Medical disclaimer">
-                    <span class="hg-vitals-results-disclaimer-icon" aria-hidden="true">
+                    <span class="hg-vitals-results-disclaimer-icon" *ngIf="showResultsDisclaimerGwIcon" aria-hidden="true">
                         <svg class="hg-vitals-vital-mark-badge-svg" viewBox="0 0 23 19" fill="none"
                             xmlns="http://www.w3.org/2000/svg">
                             <path
@@ -120,23 +116,45 @@
                         <p *ngIf="showResultsBpNote">{{ resultsBpNote }}</p>
                     </div>
                 </aside>
+                </div>
 
-                <div class="hg-vitals-results-actions" *ngIf="showResultsIssueBanner || showResultsRetry">
-                    <div class="hg-vitals-results-banner hg-vitals-results-banner-error" *ngIf="showResultsIssueBanner">
-                        <p>{{ resultsBannerPrimary }}</p>
+                <div class="hg-vitals-results-status-dock">
+                    <div class="hg-vitals-results-status hg-vitals-results-status--submitting" *ngIf="isSubmitting"
+                        role="status" aria-live="polite">
+                        <span class="hg-vitals-results-status-spinner" aria-hidden="true"></span>
+                        <p>Submitting vitals…</p>
                     </div>
-                    <footer class="hg-vitals-results-footer" *ngIf="showResultsRetry">
-                        <button type="button" class="hg-vitals-btn-retry" [disabled]="isSubmitting"
-                            (click)="onResultsRetry()">
-                            RETRY
+
+                    <div class="hg-vitals-results-status hg-vitals-results-status--success"
+                        *ngIf="showResultsSuccessBanner" role="status" aria-live="polite">
+                        <span class="hg-vitals-results-status-icon" aria-hidden="true">
+                            <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M6.5 10.2 8.8 12.5 13.6 7.5" stroke="currentColor" stroke-width="1.75"
+                                    stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </span>
+                        <p>Your vitals were submitted successfully.</p>
+                    </div>
+
+                    <div class="hg-vitals-results-status hg-vitals-results-status--warning"
+                        *ngIf="showResultsRangeWarningBanner" role="status">
+                        <p>{{ resultsRangeWarningMessage }}</p>
+                    </div>
+
+                    <div class="hg-vitals-results-status hg-vitals-results-status--error"
+                        *ngIf="showResultsSubmitError" role="alert">
+                        <p>{{ submitErrorMessage }}</p>
+                        <button type="button" class="hg-vitals-results-status-action"
+                            (click)="onSubmitSessionReview()">
+                            Try Submit Again
                         </button>
-                    </footer>
+                    </div>
                 </div>
             </ng-container>
 
             <ng-template #resultsErrorOnly>
                 <aside class="hg-vitals-results-disclaimer" aria-label="Medical disclaimer">
-                    <span class="hg-vitals-results-disclaimer-icon" aria-hidden="true">
+                    <span class="hg-vitals-results-disclaimer-icon" *ngIf="showResultsDisclaimerGwIcon" aria-hidden="true">
                         <svg class="hg-vitals-vital-mark-badge-svg" viewBox="0 0 23 19" fill="none"
                             xmlns="http://www.w3.org/2000/svg">
                             <path
@@ -149,18 +167,6 @@
                         <p *ngIf="showResultsBpNote">{{ resultsBpNote }}</p>
                     </div>
                 </aside>
-
-                <div class="hg-vitals-results-actions">
-                    <div class="hg-vitals-results-banner hg-vitals-results-banner-error">
-                        <p>{{ resultsBannerPrimary }}</p>
-                    </div>
-                    <footer class="hg-vitals-results-footer" *ngIf="showResultsRetry">
-                        <button type="button" class="hg-vitals-btn-retry" [disabled]="isSubmitting"
-                            (click)="onResultsRetry()">
-                            RETRY
-                        </button>
-                    </footer>
-                </div>
             </ng-template>
         </section>
 
@@ -169,7 +175,7 @@
                 <div class="hg-vitals-video-col">
                     <div class="hg-vitals-video-stage">
                         <video #videoEl class="hg-vitals-video" playsinline muted autoplay></video>
-                        <div class="hg-vitals-video-dim" *ngIf="isPreparingScan"></div>
+                        <div class="hg-vitals-video-dim" *ngIf="showVideoPreparingDim"></div>
                         <svg *ngIf="showFaceFrame" class="hg-vitals-overlay-svg"
                             [attr.viewBox]="'0 0 ' + scanOverlay.width + ' ' + scanOverlay.height"
                             preserveAspectRatio="xMidYMid slice" aria-hidden="true">
@@ -227,8 +233,17 @@
                 <aside class="hg-vitals-side" [class.hg-vitals-side-warn]="showSideWarning">
 
                     <div class="hg-vitals-side-alert" *ngIf="showSideWarning">
-                        <span class="hg-vitals-alert-icon" aria-hidden="true">!</span>
-                        <p class="hg-vitals-alert-text">{{ sideAlertMessage }}</p>
+                        <span class="hg-vitals-alert-icon" aria-hidden="true">
+                            <svg class="hg-vitals-alert-icon-svg" viewBox="0 0 32 28" fill="none"
+                                xmlns="http://www.w3.org/2000/svg">
+                                <path d="M16 2L30.9282 26H1.0718L16 2Z" fill="currentColor" />
+                                <path d="M16 10V17" stroke="#fff" stroke-width="2.2" stroke-linecap="round" />
+                                <circle cx="16" cy="21" r="1.4" fill="#fff" />
+                            </svg>
+                        </span>
+                        <div class="hg-vitals-alert-messages">
+                            <p class="hg-vitals-alert-text" *ngFor="let warning of activeQualityWarnings">{{ warning }}</p>
+                        </div>
                     </div>
 
                     <div class="hg-vitals-side-loading" *ngIf="isPreparingScan">
@@ -241,10 +256,16 @@
                     <ng-container *ngIf="!isPreparingScan">
                         <ul class="hg-vitals-cards" *ngIf="showCaptureCards && captureCards.length">
                             <li class="hg-vitals-card" *ngFor="let card of captureCards; trackBy: trackCaptureCard"
-                                [class.hg-vitals-card-active]="scanState === 'scanning_in_progress' && !showCardCompleteDots(card)"
-                                [class.hg-vitals-card-finalizing]="showCardCompleteDots(card)">
+                                [class.hg-vitals-card-active]="scanState === 'scanning_in_progress' && !showCardCompleteDots(card) && !showSessionReviewInCards"
+                                [class.hg-vitals-card-finalizing]="showCardCompleteDots(card)"
+                                [class.hg-vitals-card-has-result]="showCardSessionResult(card)"
+                                [class.hg-vitals-card-result-ok]="showCardSessionResult(card) && cardSessionResultKind(card) === 'measured'"
+                                [class.hg-vitals-card-result-warn]="showCardSessionResult(card) && (cardSessionResultKind(card) === 'unmeasurable' || cardSessionResultKind(card) === 'out_of_range')">
                                 <div class="hg-vitals-card-top">
                                     <span class="hg-vitals-card-label">{{ card.shortLabel }}</span>
+                                    <span class="hg-vitals-card-result-value" *ngIf="showCardSessionResult(card)">
+                                        {{ cardSessionResultText(card) }}
+                                    </span>
                                     <div class="hg-vitals-card-loader" *ngIf="showCardLoader(card)">
                                         <div class="hg-vitals-card-loader-track">
                                             <div class="hg-vitals-card-loader-bar"></div>
@@ -257,7 +278,7 @@
                                         <span class="hg-vitals-card-idle-dot"></span>
                                     </div>
                                     <div class="hg-vitals-card-idle"
-                                        *ngIf="!showCardLoader(card) && !showCardCompleteDots(card)">
+                                        *ngIf="!showCardSessionResult(card) && !showCardLoader(card) && !showCardCompleteDots(card)">
                                         <span class="hg-vitals-card-idle-dot"></span>
                                         <span class="hg-vitals-card-idle-dot"></span>
                                         <span class="hg-vitals-card-idle-dot"></span>
@@ -285,13 +306,47 @@
                             {{ scanSecondsRemaining }} seconds remaining
                         </p>
 
-                        <div class="hg-vitals-side-ready" *ngIf="scanState === 'ready_to_scan'">
-                            <p class="hg-vitals-ready-title">{{ readyScanTitle }}</p>
-                            <p class="hg-vitals-ready-sub" *ngIf="!showCoachingTip">{{ readyScanSubtitle }}</p>
-                            <p class="hg-vitals-coaching-tip" *ngIf="showCoachingTip && !showSideWarning">{{ coachingTip
-                                }}</p>
+                        <div class="hg-vitals-side-ready" *ngIf="scanState === 'ready_to_scan' && (!showSideWarning || awaitingRetry || awaitingSessionReview)">
+                            <p class="hg-vitals-ready-title" *ngIf="readyScanTitle">{{ readyScanTitle }}</p>
+                            <p class="hg-vitals-ready-sub" *ngIf="!showCoachingTip && !isSubmitting"
+                                [class.hg-vitals-ready-sub-error]="!!submitErrorMessage">{{ readyScanSubtitle }}</p>
+                            <p class="hg-vitals-ready-sub hg-vitals-ready-sub-submitting" *ngIf="isSubmitting && !isResultsView">
+                                Submitting vitals…
+                            </p>
+                            <p class="hg-vitals-coaching-tip" *ngIf="showCoachingTip && !showSideWarning && !isSubmitting">{{ coachingTip }}</p>
                         </div>
                     </ng-container>
+
+                    <footer class="hg-vitals-side-footer" *ngIf="!isPreparingScan && showRetryDecisionFooter">
+                        <div class="hg-vitals-retry-done-actions">
+                            <button type="button" class="hg-vitals-btn-retry"
+                                *ngIf="showMeasurementDecisionRetry"
+                                [class.hg-vitals-btn-submit-only]="!showMeasurementDecisionSubmit"
+                                [disabled]="retryButtonDisabled" (click)="onRetryBetweenAttempts()">
+                                RETRY
+                            </button>
+                            <button type="button" class="hg-vitals-btn-submit"
+                                *ngIf="showMeasurementDecisionSubmit"
+                                [disabled]="isSubmitting" (click)="onMeasurementSubmitClick()">
+                                SUBMIT
+                            </button>
+                        </div>
+                    </footer>
+
+                    <footer class="hg-vitals-side-footer" *ngIf="!isPreparingScan && showSessionReviewFooter">
+                        <div class="hg-vitals-session-review-actions">
+                            <button type="button" class="hg-vitals-btn-submit hg-vitals-btn-submit-only"
+                                *ngIf="showSessionReviewSubmit"
+                                [disabled]="isSubmitting" (click)="onSubmitSessionReview()">
+                                {{ submitErrorMessage ? 'TRY SUBMIT AGAIN' : 'SUBMIT' }}
+                            </button>
+                            <button type="button" class="hg-vitals-btn-discard-restart"
+                                [class.hg-vitals-btn-submit-only]="!showSessionReviewSubmit"
+                                [disabled]="isSubmitting" (click)="onDiscardSessionResultsAndRestart()">
+                                Discard these results and restart scan
+                            </button>
+                        </div>
+                    </footer>
 
                     <footer class="hg-vitals-side-footer" *ngIf="!isPreparingScan && showStartScanButton">
                         <button type="button" class="hg-vitals-btn-start" [disabled]="startScanDisabled"

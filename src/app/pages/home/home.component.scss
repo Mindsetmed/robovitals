@@ -25,6 +25,12 @@
   max-width: 1200px;
 }
 
+.hg-landing-topbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .hg-alert {
   margin-bottom: 14px;
   padding: 10px 16px;

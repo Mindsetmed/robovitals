@@ -10,13 +10,13 @@
   
     <nav class="nav">
       <div class="nav-content">
-        <h1>Vitals Web SDK <span class="version">v2.6.0</span></h1>
+        <h1>Vitals Web SDK <span class="version">v2.6.0-2</span></h1>
         <div class="nav-links">
           <a href="index.html" >Overview</a>
           <a href="integration_guide.html" >Integration Guide</a>
           <a href="mindset_rest_apis.html" >REST APIs</a>
           <a href="architecture.html" >Architecture</a>
-          <a href="examples_vanilla-js.html" class="active">Example</a>
+          <a href="examples_vanilla-js.html" class="active">Examples</a>
         </div>
       </div>
     </nav>
@@ -235,6 +235,56 @@ npm start
 # Changes to public/ files are served immediately
 # Refresh browser to see updates
 </code></pre>
+<h1>Example with Retries</h1>
+<p>This example runs a single measurement session: you measure once and submit
+whatever the SDK returns. If a vital doesn&#39;t come back (poor lighting, movement,
+the session timing out before that vital is ready), there&#39;s no second attempt.</p>
+<p>For apps that need more than one try, there&#39;s a slightly more complex companion
+example, <a href="../vanilla-js-retries"><code>vanilla-js-retries</code></a>, that adds <strong>retries
+within the same session</strong>. It&#39;s the same end-to-end flow as this example (same
+backend, same endpoints, same submission shape) with an app-level retry loop on
+top. The SDK itself still measures one session per <code>start()</code>/<code>stop()</code> and does
+not retry on its own; the loop lives in the example app.</p>
+<p>How it works:</p>
+<ol>
+<li><strong>Measure</strong> the authorized vitals once.</li>
+<li><strong>Keep</strong> any vital that came back. Readings accumulate across attempts in a
+<code>collected</code> map, so a vital read on an earlier attempt is kept even if a later
+attempt re-measures the others. (Example: RR comes back on attempt 1 and PR on
+attempt 2 - the final result has both.)</li>
+<li><strong>If something is still missing</strong>, the example does NOT auto-retry. It prompts
+the user: the Start button becomes <strong>Retry</strong> and Stop becomes <strong>Done</strong>.<ul>
+<li><strong>Retry</strong> runs another attempt, re-measuring only the still-missing vitals.</li>
+<li><strong>Done</strong> stops and submits what&#39;s been collected so far.</li>
+</ul>
+</li>
+<li><strong>Stop early</strong> once every wanted vital has a reading, or after <code>MAX_ATTEMPTS</code>
+(default 3) is reached.</li>
+<li><strong>Submit once</strong>, after the loop finishes - not on each attempt.</li>
+</ol>
+<p>Key points:</p>
+<ul>
+<li><strong>One session = one PRO.</strong> All attempts in a session aggregate into the <em>same</em>
+<code>pro_submission</code>, submitted once. Retries do <strong>not</strong> create extra PROs.</li>
+<li><strong>A new session is a new PRO.</strong> After a result is submitted the Start button
+reads <strong>Start New Session</strong>; clicking it creates a fresh PRO (via a
+<code>POST /patient/new-pro</code> backend call) so it doesn&#39;t overwrite the previous one.</li>
+<li><strong>The submitted payload is unchanged.</strong> The loop returns the SDK result with the
+aggregated readings merged in, keeping the same envelope (<code>webAppVersion</code>,
+<code>frameCollectionMethod</code>, <code>timestamp</code>, etc.), so the same <code>POST /patient/vitals</code>
+backend handles it without changes. <code>signsMsgs</code> is the most recent attempt that
+logged signs messages; earlier attempts go in <code>prevSignsMsgs</code> (newest-first).</li>
+</ul>
+<p>Where to look in <code>vanilla-js-retries/public/app.js</code>:</p>
+<ul>
+<li><code>MAX_ATTEMPTS</code> - how many attempts to allow (a ceiling, not a target)</li>
+<li><code>gotReading(tag, value)</code> - whether a vital has a usable reading; tighten this to
+clinical ranges if you want to reject and retry out-of-range readings</li>
+<li><code>measureOnce(vitals)</code> - runs one attempt, resolves on its <code>stop</code> event</li>
+<li><code>waitForRetry(...)</code> - the Retry/Done prompt between attempts</li>
+<li><code>measureWithRetries(wantedVitals)</code> - the retry/aggregate loop</li>
+</ul>
+<p>See the <a href="../vanilla-js-retries/README.md"><code>vanilla-js-retries</code> README</a> for more.</p>
 <h2>License</h2>
 <p>UNLICENSED - For demonstration purposes only</p>
 
