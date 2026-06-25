@@ -408,20 +408,65 @@ function timeLeftListener(timeLeftData) {
   progressFill.style.width = `${100 * percentComplete}%`;
 }
 
+// Clinical validity ranges, matching vital-trac-app's processAttemptResults
+// (measurement-processing.jsx). A reading inside the range is "good"; a reading
+// that is present but outside the range is "out-of-range" - it is a REAL reading
+// that must be reported, not discarded.
+const PR_MIN = 40, PR_MAX = 120; // bpm
+const RR_MIN = 8, RR_MAX = 30;   // breaths/min
+
 /**
- * Did this vital tag get a usable reading?
- *
- * Each vital in finalVitalsMeasurementValues is an object:
- *   PR_*   -> { hr }        RR_*  -> { rr }
- *   SPO2_* -> { spO2 }      BP_*  -> { BP_SYS, BP_DIA }
- * A value of 0 (or missing) means it was not measured this attempt.
+ * Extract the raw numeric value for a tag from a per-vital reading object.
+ *   PR_*   -> hr        RR_*  -> rr
+ *   SPO2_* -> spO2      BP_*  -> { BP_SYS, BP_DIA }
+ * Returns undefined when the vital was not measured this attempt.
+ */
+function readingValue(tag, value) {
+  if (!value) return undefined;
+  if (tag.startsWith('PR_')) return value.hr;
+  if (tag.startsWith('RR_')) return value.rr;
+  if (tag.startsWith('SPO2_')) return value.spO2;
+  if (tag.startsWith('BP_')) return { sys: value.BP_SYS, dia: value.BP_DIA };
+  return undefined;
+}
+
+/**
+ * Did this vital produce a usable (in-range) reading? A value of 0/missing means
+ * not measured; a value outside the clinical range is NOT "good" (it still needs
+ * verification) but is NOT discarded either - see gotAnyReading / isOutOfRange.
  */
 function gotReading(tag, value) {
-  if (!value) return false;
-  if (tag.startsWith('PR_')) return value.hr > 0;
-  if (tag.startsWith('RR_')) return value.rr > 0;
-  if (tag.startsWith('SPO2_')) return value.spO2 > 0;
-  if (tag.startsWith('BP_')) return value.BP_SYS > 0 && value.BP_DIA > 0;
+  const v = readingValue(tag, value);
+  if (v == null) return false;
+  if (tag.startsWith('PR_')) return v >= PR_MIN && v <= PR_MAX;
+  if (tag.startsWith('RR_')) return v >= RR_MIN && v <= RR_MAX;
+  if (tag.startsWith('SPO2_')) return v > 0;
+  if (tag.startsWith('BP_')) return v.sys > 0 && v.dia > 0;
+  return false;
+}
+
+/**
+ * Did this vital produce ANY reading this attempt (in-range OR out-of-range)?
+ * Used to decide whether to carry the value forward into the final values.
+ */
+function gotAnyReading(tag, value) {
+  const v = readingValue(tag, value);
+  if (v == null) return false;
+  if (tag.startsWith('PR_') || tag.startsWith('RR_') || tag.startsWith('SPO2_')) return v > 0;
+  if (tag.startsWith('BP_')) return v.sys > 0 && v.dia > 0;
+  return false;
+}
+
+/**
+ * Is this a present-but-out-of-range reading (PR/RR only have range gates)?
+ * vital-trac keeps out-of-range readings and reports them rather than retrying
+ * them into oblivion: a 2nd out-of-range reading should be SUBMITTED, not wiped.
+ */
+function isOutOfRange(tag, value) {
+  const v = readingValue(tag, value);
+  if (v == null || v <= 0) return false;
+  if (tag.startsWith('PR_')) return v < PR_MIN || v > PR_MAX;
+  if (tag.startsWith('RR_')) return v < RR_MIN || v > RR_MAX;
   return false;
 }
 
@@ -495,13 +540,33 @@ function waitForRetry(stillNeeded, attempt) {
   });
 }
 
+/**
+ * Measure with retries, aggregating across attempts the way vital-trac-app does.
+ *
+ * Key behaviors (ported from vital-trac processAttemptResults):
+ *  - finalValues keeps the best-known reading per vital and CARRIES OUT-OF-RANGE
+ *    READINGS FORWARD. An out-of-range PR/RR is a real result that gets reported,
+ *    not dropped, and it does NOT trigger another retry (so a 2nd out-of-range
+ *    reading is submitted instead of being wiped by a 3rd "unable to measure").
+ *  - "stillNeeded" = vitals with NO reading at all yet. A vital that produced
+ *    any reading (in-range or out-of-range) is satisfied and not re-measured.
+ *  - Per-attempt arrays are kept NEWEST-FIRST and index-aligned: vitals[0] /
+ *    signsMsgs[0] are the newest attempt; prevVitals[i] and prevSignsMsgs[i]
+ *    describe the same older attempt.
+ *  - noValidMeasurements is always false here (matches vital-trac's submit path);
+ *    the caller decides, from finalVitalsMeasurementValues, whether anything is
+ *    submittable.
+ */
 async function measureWithRetries(wantedVitals) {
-  const collected = {};      // tag -> reading, gathered across attempts
-  const signsByAttempt = []; // each attempt's signsMsgs, oldest-first
+  const finalValues = {};            // tag -> best reading (incl. out-of-range), carried across attempts
+  const vitalsByAttempt = [];        // each attempt's per-vital readings, NEWEST-first
+  const signsByAttempt = [];         // each attempt's signsMsgs, NEWEST-first
   let lastResult = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const stillNeeded = wantedVitals.filter((tag) => !gotReading(tag, collected[tag]));
+    // A vital is "still needed" only if it has produced no reading at all yet.
+    // Out-of-range readings count as produced (carried forward, reported as-is).
+    const stillNeeded = wantedVitals.filter((tag) => !gotAnyReading(tag, finalValues[tag]));
     if (stillNeeded.length === 0) break;
 
     // After the first attempt, don't auto-retry: ask the user and wait for them
@@ -528,35 +593,52 @@ async function measureWithRetries(wantedVitals) {
     lastResult = result;
 
     const readings = result.finalVitalsMeasurementValues || {};
+
+    // Carry forward best-known value per vital. Prefer an in-range reading; if we
+    // only have an out-of-range one, keep it (it gets reported). Never overwrite a
+    // good reading from an earlier attempt with a worse/empty later one.
     stillNeeded.forEach((tag) => {
-      if (gotReading(tag, readings[tag])) {
-        collected[tag] = readings[tag];
+      const r = readings[tag];
+      if (gotReading(tag, r)) {
+        finalValues[tag] = r;                 // in-range: best case
+      } else if (isOutOfRange(tag, r) && !gotReading(tag, finalValues[tag])) {
+        finalValues[tag] = r;                 // out-of-range: keep & report, don't retry away
+      } else if (gotAnyReading(tag, r) && finalValues[tag] == null) {
+        finalValues[tag] = r;                 // any other present reading (e.g. SpO2/BP) carried forward
       }
     });
 
-    signsByAttempt.push(result.signsMsgs || {});
+    // Newest-first, index-aligned per-attempt history. Each entry mirrors
+    // vital-trac's vitalsMeasurements[i]: the FULL final core message for that
+    // attempt (result.vitals from the SDK = the whole endSession message, which
+    // carries .vitals, .dataStatus, .sessionTime, .metadata, ...). Keeping the
+    // full message per attempt is what the Mindset API / archive expects.
+    vitalsByAttempt.unshift(result.vitals || {});
+    signsByAttempt.unshift(result.signsMsgs || {});
   }
 
-  // signsMsgs = latest attempt that actually logged signs; prevSignsMsgs = the
-  // rest, newest-first. A late attempt re-measures only the missing vitals and
-  // can finish with no signs, so prefer the latest non-empty one.
-  let primary = signsByAttempt.length - 1;
-  for (let i = signsByAttempt.length - 1; i >= 0; i--) {
-    if (Object.keys(signsByAttempt[i] || {}).length > 0) { primary = i; break; }
-  }
-  const signsMsgs = signsByAttempt[primary] || {};
-  const prevSignsMsgs = signsByAttempt.filter((_, i) => i !== primary).reverse();
+  // signsMsgs / vitals = NEWEST attempt; prevSignsMsgs / prevVitals = older
+  // attempts newest-first, index-aligned (matches vital-trac handleSubmission).
+  const signsMsgs = signsByAttempt[0] || {};
+  const prevSignsMsgs = signsByAttempt.slice(1);
+  const vitals = vitalsByAttempt[0] || {};
+  const prevVitals = vitalsByAttempt.slice(1);
 
   // Merge the aggregated readings into the last real SDK result so the envelope
-  // fields are preserved. If no attempt ran, fall back to a minimal shape.
+  // fields are preserved (webAppVersion, frameCollectionMethod, timestamp,
+  // captureTimeUsed, vitalCoreVersion, etc.). If no attempt ran, fall back to a
+  // minimal shape.
   const base = lastResult || {};
   return {
     ...base,
-    vitals: { ...(base.vitals || {}), vitals: collected },
-    finalVitalsMeasurementValues: collected,
+    vitals,                  // newest attempt's full core message (vital-trac: vitalsMeasurements[0])
+    prevVitals,              // older attempts' full core messages, newest-first
+    finalVitalsMeasurementValues: finalValues, // best-per-vital, incl. carried-forward out-of-range
     signsMsgs,
     prevSignsMsgs,
-    noValidMeasurements: Object.keys(collected).length === 0,
+    // Matches vital-trac's submit path: always false here. The caller inspects
+    // finalVitalsMeasurementValues to decide if there is anything submittable.
+    noValidMeasurements: false,
   };
 }
 
