@@ -1,6 +1,11 @@
 export const MINDSET_VITALS_WORKER_DIRECTORY = '/assets/mindset-vitals/dist';
 
-export const MINDSET_VITALS_SDK_ASSET_VERSION = '2.6.0-2';
+// Bumped to 2.6.0-3 so the cache-bust query string changes and browsers refetch
+// the SDK client bundle instead of serving a force-cached copy of the old one.
+// The worker and wasm binaries come from vital_monitoring core 2.6.0 and did not
+// change, only the SDK client code did, but bumping the version keeps everything
+// on one cache key.
+export const MINDSET_VITALS_SDK_ASSET_VERSION = '2.6.0-3';
 
 const BASE = MINDSET_VITALS_WORKER_DIRECTORY;
 
