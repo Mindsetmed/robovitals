@@ -1,6 +1,7 @@
 export const MINDSET_VITALS_WORKER_DIRECTORY = '/assets/mindset-vitals/dist';
 
-export const MINDSET_VITALS_SDK_ASSET_VERSION = '2.6.0-2';
+// Cache-bust key for the SDK assets. Bumped to refetch the new client bundle.
+export const MINDSET_VITALS_SDK_ASSET_VERSION = '2.6.0-3';
 
 const BASE = MINDSET_VITALS_WORKER_DIRECTORY;
 

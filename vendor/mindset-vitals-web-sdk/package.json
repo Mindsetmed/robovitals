@@ -1,6 +1,6 @@
 {
   "name": "@mindset-vitals/web-sdk",
-  "version": "2.6.0-2",
+  "version": "2.6.0-3",
   "description": "Browser-first Web SDK for Vital-Core worker",
   "type": "module",
   "main": "./dist/index.js",
